@@ -1,33 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import { Maximize2, Minus, Plus } from "lucide-react";
-import { nodeKindColor } from "@/lib/theme";
+import { alpha, nodeKindColor } from "@/lib/theme";
 import { useTheme } from "@/state/ThemeProvider";
 import type { NodeKind, RepoGraph } from "@/lib/types";
 
-const VW = 900;
-const VH = 560;
-const MIN_K = 0.4;
-const MAX_K = 3.2;
-
-interface SimNode {
+/** Nodo aumentado para el grafo (react-force-graph muta x/y/vx/vy). */
+interface GNode {
   id: string;
   kind: NodeKind;
   name: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  r: number;
-  fixed: boolean;
+  val: number;
+  x?: number;
+  y?: number;
+}
+interface GLink {
+  source: string;
+  target: string;
+  type: string;
 }
 
-interface View {
-  x: number;
-  y: number;
-  k: number;
-}
-
-const RADIUS: Record<NodeKind, number> = { module: 9, class: 7, function: 5.5, method: 4.5 };
+const RADIUS: Record<NodeKind, number> = { module: 6, class: 4.5, function: 3.6, method: 3 };
 
 interface GraphViewProps {
   graph: RepoGraph;
@@ -36,28 +29,36 @@ interface GraphViewProps {
 }
 
 /**
- * Grafo dirigido por fuerzas en SVG puro con comportamiento de mapa:
- * zoom con la rueda (hacia el cursor), pan arrastrando el fondo, arrastre de
- * nodos y resaltado de vecinos. Simulación propia vía requestAnimationFrame.
+ * Vista de grafo estilo Obsidian con `react-force-graph-2d` (Canvas + d3-force).
+ * Física de gravedad/rebote, arrastre de nodos y zoom/pan nativos de alto
+ * rendimiento. El dibujo de nodos y el resaltado de vecinos son personalizados
+ * y siguen el tema activo (claro/oscuro).
  */
 export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
-  const { p } = useTheme();
-  const svgRef = useRef<SVGSVGElement>(null);
-  const gRef = useRef<SVGGElement>(null);
-  const nodesRef = useRef<SimNode[]>([]);
-  const alphaRef = useRef(1);
-  const rafRef = useRef<number>(0);
-  const dragRef = useRef<string | null>(null);
-  const viewRef = useRef<View>({ x: 0, y: 0, k: 1 });
-  const panRef = useRef<{ active: boolean; lastX: number; lastY: number; moved: boolean }>({
-    active: false,
-    lastX: 0,
-    lastY: 0,
-    moved: false,
-  });
-  const [, setTick] = useState(0);
+  const { p, resolved } = useTheme();
+  const fgRef = useRef<ForceGraphMethods<GNode, GLink>>();
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ w: 800, h: 560 });
   const [hovered, setHovered] = useState<string | null>(null);
-  const render = useCallback(() => setTick((t) => t + 1), []);
+
+  // Datos en el formato de la librería. Se clonan para que la simulación mute
+  // sus propias copias (no los datos del store).
+  const data = useMemo(
+    () => ({
+      nodes: graph.nodes.map<GNode>((n) => ({
+        id: n.id,
+        kind: n.kind,
+        name: n.name,
+        val: RADIUS[n.kind],
+      })),
+      links: graph.links.map<GLink>((l) => ({
+        source: l.source,
+        target: l.target,
+        type: l.type,
+      })),
+    }),
+    [graph],
+  );
 
   const adjacency = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -69,350 +70,134 @@ export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
     return map;
   }, [graph]);
 
-  // --- Simulación de fuerzas ---
-  const tickSim = useCallback(() => {
-    const nodes = nodesRef.current;
-    const alpha = alphaRef.current;
-    const byId = new Map(nodes.map((nd) => [nd.id, nd]));
-
-    for (let i = 0; i < nodes.length; i++) {
-      const a = nodes[i];
-      for (let j = i + 1; j < nodes.length; j++) {
-        const b = nodes[j];
-        let dx = a.x - b.x;
-        let dy = a.y - b.y;
-        let d2 = dx * dx + dy * dy;
-        if (d2 < 0.01) {
-          dx = Math.random() - 0.5;
-          dy = Math.random() - 0.5;
-          d2 = 0.01;
-        }
-        const dist = Math.sqrt(d2);
-        const force = (2600 / d2) * alpha;
-        a.vx += (dx / dist) * force;
-        a.vy += (dy / dist) * force;
-        b.vx -= (dx / dist) * force;
-        b.vy -= (dy / dist) * force;
-      }
-    }
-
-    for (const l of graph.links) {
-      const a = byId.get(l.source);
-      const b = byId.get(l.target);
-      if (!a || !b) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
-      const k = (dist - 78) * 0.015 * alpha;
-      a.vx += (dx / dist) * k;
-      a.vy += (dy / dist) * k;
-      b.vx -= (dx / dist) * k;
-      b.vy -= (dy / dist) * k;
-    }
-
-    for (const nd of nodes) {
-      nd.vx += (VW / 2 - nd.x) * 0.006 * alpha;
-      nd.vy += (VH / 2 - nd.y) * 0.006 * alpha;
-      if (nd.fixed) {
-        nd.vx = 0;
-        nd.vy = 0;
-        continue;
-      }
-      nd.vx *= 0.86;
-      nd.vy *= 0.86;
-      nd.x += nd.vx;
-      nd.y += nd.vy;
-    }
-
-    alphaRef.current = Math.max(0, alpha - 0.008);
-  }, [graph]);
-
-  const startLoop = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    const loop = () => {
-      tickSim();
-      render();
-      if (alphaRef.current > 0.01 || dragRef.current) {
-        rafRef.current = requestAnimationFrame(loop);
-      }
-    };
-    rafRef.current = requestAnimationFrame(loop);
-  }, [tickSim, render]);
-
-  const reheat = useCallback(() => {
-    alphaRef.current = Math.max(alphaRef.current, 0.4);
-    startLoop();
-  }, [startLoop]);
-
-  // Inicializa nodos al cambiar el grafo.
+  // Tamaño responsivo del contenedor.
   useEffect(() => {
-    const n = graph.nodes.length;
-    nodesRef.current = graph.nodes.map((node, i) => {
-      const angle = (i / n) * Math.PI * 2;
-      const radius = 150 + (i % 5) * 22;
-      return {
-        id: node.id,
-        kind: node.kind,
-        name: node.name,
-        x: VW / 2 + Math.cos(angle) * radius,
-        y: VH / 2 + Math.sin(angle) * radius,
-        vx: 0,
-        vy: 0,
-        r: RADIUS[node.kind],
-        fixed: false,
-      };
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0].contentRect;
+      setSize({ w: Math.round(cr.width), h: Math.round(cr.height) });
     });
-    viewRef.current = { x: 0, y: 0, k: 1 };
-    alphaRef.current = 1;
-    startLoop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph]);
-
-  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
-
-  // --- Conversión de coordenadas ---
-  // Puntero → coords del viewBox (antes de la transform del grupo).
-  const toViewBox = (clientX: number, clientY: number) => {
-    const svg = svgRef.current!;
-    const pt = svg.createSVGPoint();
-    pt.x = clientX;
-    pt.y = clientY;
-    const loc = pt.matrixTransform(svg.getScreenCTM()!.inverse());
-    return { x: loc.x, y: loc.y };
-  };
-  // Puntero → coords del mundo (dentro del grupo con zoom/pan).
-  const toWorld = (clientX: number, clientY: number) => {
-    const g = gRef.current!;
-    const pt = svgRef.current!.createSVGPoint();
-    pt.x = clientX;
-    pt.y = clientY;
-    const loc = pt.matrixTransform(g.getScreenCTM()!.inverse());
-    return { x: loc.x, y: loc.y };
-  };
-
-  // --- Zoom (rueda, hacia el cursor) con listener no-pasivo ---
-  useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const vb = toViewBox(e.clientX, e.clientY);
-      const view = viewRef.current;
-      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      const k = Math.max(MIN_K, Math.min(MAX_K, view.k * factor));
-      // Mantén fijo el punto bajo el cursor.
-      const wx = (vb.x - view.x) / view.k;
-      const wy = (vb.y - view.y) / view.k;
-      viewRef.current = { k, x: vb.x - wx * k, y: vb.y - wy * k };
-      render();
-    };
-    svg.addEventListener("wheel", onWheel, { passive: false });
-    return () => svg.removeEventListener("wheel", onWheel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
-  // --- Zoom por botones / ajustar ---
-  const zoomBy = (factor: number) => {
-    const view = viewRef.current;
-    const k = Math.max(MIN_K, Math.min(MAX_K, view.k * factor));
-    const cx = VW / 2;
-    const cy = VH / 2;
-    const wx = (cx - view.x) / view.k;
-    const wy = (cy - view.y) / view.k;
-    viewRef.current = { k, x: cx - wx * k, y: cy - wy * k };
-    render();
-  };
+  // Física estilo Obsidian + encuadre inicial.
+  useEffect(() => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    fg.d3Force("charge")?.strength(-150);
+    fg.d3Force("link")?.distance(42);
+    const t = setTimeout(() => fg.zoomToFit(500, 50), 400);
+    return () => clearTimeout(t);
+  }, [graph]);
 
-  const fit = useCallback(() => {
-    const nodes = nodesRef.current;
-    if (nodes.length === 0) return;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const nd of nodes) {
-      minX = Math.min(minX, nd.x);
-      minY = Math.min(minY, nd.y);
-      maxX = Math.max(maxX, nd.x);
-      maxY = Math.max(maxY, nd.y);
-    }
-    const pad = 60;
-    const w = maxX - minX + pad * 2;
-    const h = maxY - minY + pad * 2;
-    const k = Math.max(MIN_K, Math.min(MAX_K, Math.min(VW / w, VH / h)));
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    viewRef.current = { k, x: VW / 2 - cx * k, y: VH / 2 - cy * k };
-    render();
-  }, [render]);
-
-  // --- Interacción de nodos ---
-  const onNodePointerDown = (id: string) => (e: React.PointerEvent) => {
-    e.stopPropagation();
-    (e.target as Element).setPointerCapture(e.pointerId);
-    dragRef.current = id;
-    const node = nodesRef.current.find((nd) => nd.id === id);
-    if (node) node.fixed = true;
-    onSelect(id);
-    reheat();
-  };
-
-  // --- Pan del fondo ---
-  const onBgPointerDown = (e: React.PointerEvent) => {
-    (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    panRef.current = { active: true, lastX: e.clientX, lastY: e.clientY, moved: false };
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (dragRef.current) {
-      const node = nodesRef.current.find((nd) => nd.id === dragRef.current);
-      if (!node) return;
-      const { x, y } = toWorld(e.clientX, e.clientY);
-      node.x = x;
-      node.y = y;
-      node.vx = 0;
-      node.vy = 0;
-      render();
-      return;
-    }
-    if (panRef.current.active) {
-      const dx = e.clientX - panRef.current.lastX;
-      const dy = e.clientY - panRef.current.lastY;
-      // Convierte el delta de pantalla a unidades de viewBox.
-      const rect = svgRef.current!.getBoundingClientRect();
-      const sx = VW / rect.width;
-      const sy = VH / rect.height;
-      viewRef.current = {
-        ...viewRef.current,
-        x: viewRef.current.x + dx * sx,
-        y: viewRef.current.y + dy * sy,
-      };
-      panRef.current.lastX = e.clientX;
-      panRef.current.lastY = e.clientY;
-      panRef.current.moved = true;
-      render();
-    }
-  };
-
-  const endInteraction = () => {
-    if (dragRef.current) {
-      const node = nodesRef.current.find((nd) => nd.id === dragRef.current);
-      if (node) node.fixed = false;
-      dragRef.current = null;
-      reheat();
-    }
-    if (panRef.current.active) {
-      // Un clic sin arrastre en el fondo deselecciona.
-      if (!panRef.current.moved) onSelect(null);
-      panRef.current.active = false;
-    }
-  };
+  // Al cambiar de tema, reactiva la simulación para repintar con los colores
+  // nuevos sin perder las posiciones actuales.
+  useEffect(() => {
+    fgRef.current?.d3ReheatSimulation();
+  }, [resolved]);
 
   const active = hovered ?? selectedId;
   const neighbors = active ? adjacency.get(active) : null;
-  const isDimmed = (id: string) =>
-    active != null && id !== active && !(neighbors?.has(id) ?? false);
 
-  const nodes = nodesRef.current;
-  const byId = new Map(nodes.map((nd) => [nd.id, nd]));
-  const { x, y, k } = viewRef.current;
+  const isDim = useCallback(
+    (id: string) => active != null && id !== active && !(neighbors?.has(id) ?? false),
+    [active, neighbors],
+  );
+
+  const zoomBy = (factor: number) => {
+    const fg = fgRef.current;
+    if (!fg) return;
+    fg.zoom(fg.zoom() * factor, 220);
+  };
+  const fit = () => fgRef.current?.zoomToFit(400, 50);
 
   return (
-    <div className="relative">
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${VW} ${VH}`}
-        className={`h-[560px] w-full touch-none select-none ${
-          panRef.current.active ? "cursor-grabbing" : "cursor-grab"
-        }`}
-        onPointerDown={onBgPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endInteraction}
-        onPointerLeave={endInteraction}
-      >
-        {/* Fondo captor de eventos (pan) */}
-        <rect x={0} y={0} width={VW} height={VH} fill="transparent" />
+    <div ref={wrapRef} className="relative h-[560px] w-full">
+      <ForceGraph2D<GNode, GLink>
+        ref={fgRef}
+        width={size.w}
+        height={size.h}
+        graphData={data}
+        backgroundColor="rgba(0,0,0,0)"
+        cooldownTicks={120}
+        d3VelocityDecay={0.3}
+        nodeRelSize={1}
+        nodeVal={(n) => n.val}
+        onNodeHover={(n) => setHovered(n ? n.id : null)}
+        onNodeClick={(n) => onSelect(n.id)}
+        onBackgroundClick={() => onSelect(null)}
+        linkColor={(l) => {
+          const s = typeof l.source === "object" ? (l.source as GNode).id : (l.source as string);
+          const t = typeof l.target === "object" ? (l.target as GNode).id : (l.target as string);
+          const on = active != null && (s === active || t === active);
+          if (on) return p.accent;
+          return active != null ? alpha(p.border, 0.35) : alpha(p.border, 0.9);
+        }}
+        linkWidth={(l) => {
+          const s = typeof l.source === "object" ? (l.source as GNode).id : (l.source as string);
+          const t = typeof l.target === "object" ? (l.target as GNode).id : (l.target as string);
+          return active != null && (s === active || t === active) ? 1.6 : 0.8;
+        }}
+        linkDirectionalParticles={(l) => {
+          const s = typeof l.source === "object" ? (l.source as GNode).id : (l.source as string);
+          const t = typeof l.target === "object" ? (l.target as GNode).id : (l.target as string);
+          return active != null && (s === active || t === active) ? 2 : 0;
+        }}
+        linkDirectionalParticleWidth={2}
+        linkDirectionalParticleColor={() => p.accent}
+        nodeCanvasObject={(node, ctx, globalScale) => {
+          const n = node as GNode;
+          const r = n.val;
+          const dim = isDim(n.id);
+          const isActive = n.id === active;
+          const color = nodeKindColor(p, n.kind);
 
-        <g ref={gRef} transform={`translate(${x} ${y}) scale(${k})`}>
-          {/* Aristas */}
-          <g>
-            {graph.links.map((l, i) => {
-              const a = byId.get(l.source);
-              const b = byId.get(l.target);
-              if (!a || !b) return null;
-              const linkActive = active != null && (l.source === active || l.target === active);
-              const dim = active != null && !linkActive;
-              return (
-                <line
-                  key={i}
-                  x1={a.x}
-                  y1={a.y}
-                  x2={b.x}
-                  y2={b.y}
-                  stroke={linkActive ? p.accent : p.border}
-                  strokeWidth={linkActive ? 1.6 : 1}
-                  strokeDasharray={l.type === "inherits" ? "4 3" : undefined}
-                  style={{
-                    opacity: dim ? 0.12 : 0.7,
-                    transition: "opacity .25s ease, stroke .25s ease",
-                  }}
-                />
-              );
-            })}
-          </g>
+          // Halo del nodo activo
+          if (isActive) {
+            ctx.beginPath();
+            ctx.arc(n.x!, n.y!, r + 3, 0, 2 * Math.PI);
+            ctx.fillStyle = alpha(color, 0.25);
+            ctx.fill();
+          }
 
-          {/* Nodos */}
-          <g>
-            {nodes.map((nd, i) => {
-              const color = nodeKindColor(p, nd.kind);
-              const dim = isDimmed(nd.id);
-              const isActive = nd.id === active;
-              const showLabel =
-                nd.kind === "module" || isActive || (neighbors?.has(nd.id) ?? false);
-              return (
-                <g
-                  key={nd.id}
-                  transform={`translate(${nd.x} ${nd.y})`}
-                  className="graph-node cursor-pointer"
-                  style={{
-                    animationDelay: `${Math.min(i * 18, 500)}ms`,
-                    opacity: dim ? 0.25 : 1,
-                    transition: "opacity .25s ease",
-                  }}
-                  onPointerDown={onNodePointerDown(nd.id)}
-                  onPointerEnter={() => setHovered(nd.id)}
-                  onPointerLeave={() => setHovered(null)}
-                >
-                  {isActive && (
-                    <circle r={nd.r + 5} fill="none" stroke={color} strokeWidth={1.5} opacity={0.4} />
-                  )}
-                  <circle r={nd.r} fill={color} stroke={p.bg} strokeWidth={1.5} />
-                  {showLabel && (
-                    <text
-                      x={nd.r + 4}
-                      y={3.5}
-                      fontSize={nd.kind === "module" ? 11 : 9.5}
-                      fontWeight={nd.kind === "module" ? 700 : 500}
-                      fill={isActive ? p.ink : p.muted}
-                      style={{ pointerEvents: "none" }}
-                    >
-                      {nd.name}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </g>
-        </g>
-      </svg>
+          ctx.beginPath();
+          ctx.arc(n.x!, n.y!, r, 0, 2 * Math.PI);
+          ctx.fillStyle = dim ? alpha(color, 0.25) : color;
+          ctx.fill();
+          ctx.lineWidth = 0.6;
+          ctx.strokeStyle = p.bg;
+          ctx.stroke();
+
+          // Etiqueta: módulos siempre; el resto al acercar o al resaltar.
+          const showLabel =
+            n.kind === "module" || isActive || (neighbors?.has(n.id) ?? false) || globalScale > 2.2;
+          if (showLabel && !dim) {
+            const fontSize = Math.max(2.5, (n.kind === "module" ? 4.2 : 3.4));
+            ctx.font = `${n.kind === "module" ? 700 : 500} ${fontSize}px Inter, sans-serif`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillStyle = isActive ? p.ink : p.muted;
+            ctx.fillText(n.name, n.x! + r + 1.5, n.y!);
+          }
+        }}
+        nodePointerAreaPaint={(node, color, ctx) => {
+          const n = node as GNode;
+          ctx.beginPath();
+          ctx.arc(n.x!, n.y!, n.val + 2, 0, 2 * Math.PI);
+          ctx.fillStyle = color;
+          ctx.fill();
+        }}
+      />
 
       {/* Controles de zoom */}
       <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-card">
-        <CtrlBtn onClick={() => zoomBy(1.25)} title="Acercar">
+        <CtrlBtn onClick={() => zoomBy(1.3)} title="Acercar">
           <Plus size={15} />
         </CtrlBtn>
         <div className="h-px bg-border" />
-        <CtrlBtn onClick={() => zoomBy(1 / 1.25)} title="Alejar">
+        <CtrlBtn onClick={() => zoomBy(1 / 1.3)} title="Alejar">
           <Minus size={15} />
         </CtrlBtn>
         <div className="h-px bg-border" />
@@ -422,7 +207,7 @@ export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
       </div>
 
       <div className="pointer-events-none absolute left-3 top-3 text-[0.68rem] text-faint">
-        Rueda para zoom · arrastra el fondo para desplazar
+        Rueda para zoom · arrastra el fondo para desplazar · arrastra nodos
       </div>
     </div>
   );
