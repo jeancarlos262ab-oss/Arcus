@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Sidebar, type PageKey } from "@/components/Sidebar";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { ActivityPage } from "@/pages/ActivityPage";
+import { GraphPage } from "@/pages/GraphPage";
 import { FindingsPage } from "@/pages/FindingsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 
@@ -27,6 +28,7 @@ function Shell() {
         <div key={page} className="animate-fade-in">
           {page === "overview" && <OverviewPage onNewReview={() => setPage("activity")} />}
           {page === "activity" && <ActivityPage />}
+          {page === "graph" && <GraphPage />}
           {page === "findings" && <FindingsPage />}
           {page === "settings" && <SettingsPage />}
         </div>

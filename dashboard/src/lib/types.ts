@@ -62,3 +62,33 @@ export interface ReviewRun {
   ran_diff_only: boolean;
   duration_s: number;
 }
+
+// --- Grafo de contexto (RepoGraph en S3, ver design.md) ---
+
+export type NodeKind = "module" | "class" | "function" | "method";
+export type LinkType = "imports" | "calls" | "inherits" | "defines";
+
+export interface GraphNode {
+  id: string;
+  kind: NodeKind;
+  file: string;
+  name: string;
+  line_start: number;
+  line_end: number;
+  signature?: string;
+  docstring_present?: boolean;
+}
+
+export interface GraphLink {
+  source: string;
+  target: string;
+  type: LinkType;
+}
+
+export interface RepoGraph {
+  repo: string;
+  graph_version: string;
+  language: string;
+  nodes: GraphNode[];
+  links: GraphLink[];
+}

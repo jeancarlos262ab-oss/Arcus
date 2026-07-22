@@ -118,3 +118,28 @@ export const TYPE_LABEL: Record<FindingType, string> = {
 export function seriesColors(p: Palette): string[] {
   return [p.accent, p.low, p.medium, p.high, p.orange];
 }
+
+import type { NodeKind, LinkType } from "./types";
+
+export function nodeKindColor(p: Palette, kind: NodeKind): string {
+  return {
+    module: p.accent,
+    class: p.low,
+    function: p.success,
+    method: p.medium,
+  }[kind];
+}
+
+export const NODE_KIND_LABEL: Record<NodeKind, string> = {
+  module: "Módulo",
+  class: "Clase",
+  function: "Función",
+  method: "Método",
+};
+
+export const LINK_TYPE_LABEL: Record<LinkType, string> = {
+  imports: "importa",
+  calls: "llama",
+  inherits: "hereda",
+  defines: "define",
+};

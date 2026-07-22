@@ -1,7 +1,7 @@
-import { Activity, FolderGit2, LayoutDashboard, Settings, ShieldCheck } from "lucide-react";
+import { Activity, FolderGit2, LayoutDashboard, Settings, ShieldCheck, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-export type PageKey = "overview" | "activity" | "findings" | "settings";
+export type PageKey = "overview" | "activity" | "graph" | "findings" | "settings";
 
 interface SidebarProps {
   page: PageKey;
@@ -14,6 +14,7 @@ interface SidebarProps {
 const NAV: { key: PageKey; label: string; icon: LucideIcon }[] = [
   { key: "overview", label: "Resumen", icon: LayoutDashboard },
   { key: "activity", label: "Actividad", icon: Activity },
+  { key: "graph", label: "Grafo", icon: Workflow },
   { key: "findings", label: "Hallazgos", icon: ShieldCheck },
   { key: "settings", label: "Ajustes", icon: Settings },
 ];
