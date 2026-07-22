@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Tema oscuro (por defecto) */
+  .dark {
+    color-scheme: dark;
+    --bg: 13 17 23;
+    --surface: 22 27 34;
+    --surface-2: 28 33 41;
+    --border: 42 49 60;
+    --border-strong: 58 66 78;
+    --ink: 230 237 243;
+    --muted: 139 148 158;
+    --faint: 110 118 129;
+    --accent: 45 212 191;
+    --accent-hover: 52 231 206;
+    --high: 248 81 73;
+    --medium: 227 160 8;
+    --low: 88 166 255;
+    --success: 63 185 80;
+    --grad-a: rgba(45, 212, 191, 0.07);
+    --grad-b: rgba(88, 166, 255, 0.05);
+  }
+
+  /* Tema claro */
+  .light {
+    color-scheme: light;
+    --bg: 247 249 251;
+    --surface: 255 255 255;
+    --surface-2: 241 244 248;
+    --border: 223 227 233;
+    --border-strong: 200 206 214;
+    --ink: 24 31 42;
+    --muted: 90 100 114;
+    --faint: 130 139 151;
+    --accent: 13 148 136;
+    --accent-hover: 15 118 110;
+    --high: 220 38 38;
+    --medium: 176 108 8;
+    --low: 37 99 235;
+    --success: 22 138 62;
+    --grad-a: rgba(13, 148, 136, 0.06);
+    --grad-b: rgba(37, 99, 235, 0.05);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    background-image:
+      radial-gradient(900px 500px at 12% -8%, var(--grad-a), transparent 60%),
+      radial-gradient(800px 500px at 100% 0%, var(--grad-b), transparent 55%);
+    background-attachment: fixed;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border-strong rounded-lg;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-surface border border-border rounded-xl2 shadow-card;
+  }
+
+  .panel-hover {
+    @apply transition-all duration-200 hover:border-border-strong hover:-translate-y-0.5;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+
+  .focus-ring {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink placeholder:text-faint transition-colors focus:border-accent focus-ring;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors focus-ring disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-bg hover:bg-accent-hover;
+  }
+
+  .btn-ghost {
+    @apply btn border border-border bg-surface text-ink hover:bg-surface-2;
+  }
+}
