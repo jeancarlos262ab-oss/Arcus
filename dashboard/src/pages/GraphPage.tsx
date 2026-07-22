@@ -48,7 +48,7 @@ export function GraphPage() {
         <div className="lg:col-span-3">
           <Panel
             title="Estructura del repositorio"
-            subtitle="Arrastra los nodos · pasa el cursor para resaltar vecinos"
+            subtitle="Zoom con la rueda · arrastra el fondo para desplazar · arrastra nodos · pasa el cursor para resaltar"
             action={
               <div className="flex flex-wrap gap-2.5">
                 {(Object.keys(NODE_KIND_LABEL) as NodeKind[]).map((k) => (
