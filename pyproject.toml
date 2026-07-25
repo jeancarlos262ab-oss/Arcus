@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcus"
+version = "0.1.0"
+description = "Arcus: AI-powered PR review pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "boto3>=1.28",
+    "tenacity>=8.2",
+    "requests>=2.31",
+    "tree-sitter>=0.20.0",
+    "tree-sitter-python>=0.20.0",
+    "networkx>=3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.0",
+    "mypy>=1.5",
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "responses>=0.23",
+    "moto[s3,dynamodb]>=4.2",
+]
+graph = [
+    "tree-sitter>=0.20.0",
+    "tree-sitter-python>=0.20.0",
+    "networkx>=3.2",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+exclude = [".git", ".venv", "venv", "__pycache__", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP"]
+ignore = ["E501"]  # line too long — handled by formatter
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = ["moto.*", "responses.*", "networkx", "tree_sitter.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short --strict-markers"
