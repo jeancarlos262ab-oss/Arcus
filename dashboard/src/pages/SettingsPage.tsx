@@ -1,13 +1,20 @@
 import { useState } from "react";
-import { Check, Monitor, Moon, Plus, Sun, Trash2, TriangleAlert } from "lucide-react";
+import { Check, Plus, Trash2, TriangleAlert } from "lucide-react";
 
 import { Header } from "@/components/Header";
 import { Panel } from "@/components/Panel";
-import { Field, Segmented, Select, Toggle } from "@/components/ui/Field";
+import { Field, Select, Toggle } from "@/components/ui/Field";
+import { ThemePreviewCard } from "@/components/ui/ThemePreview";
 import { useStore } from "@/state/StoreProvider";
 import { useTheme } from "@/state/ThemeProvider";
 import type { ThemeMode } from "@/lib/theme";
 import type { Severity } from "@/lib/types";
+
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: "light", label: "Claro" },
+  { value: "dark", label: "Oscuro" },
+  { value: "system", label: "Sistema" },
+];
 
 /** Pantalla de ajustes: apariencia, repos, pipeline, integración y datos. */
 export function SettingsPage() {
@@ -36,17 +43,18 @@ export function SettingsPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Apariencia */}
         <Panel title="Apariencia" subtitle="Tema de la interfaz">
-          <Field label="Tema">
-            <Segmented<ThemeMode>
-              value={mode}
-              onChange={setMode}
-              options={[
-                { value: "light", label: "Claro", icon: <Sun size={14} /> },
-                { value: "dark", label: "Oscuro", icon: <Moon size={14} /> },
-                { value: "system", label: "Sistema", icon: <Monitor size={14} /> },
-              ]}
-            />
-          </Field>
+          <span className="mb-1.5 block text-xs font-semibold text-muted">Tema</span>
+          <div className="grid grid-cols-3 gap-2.5">
+            {THEME_OPTIONS.map((o) => (
+              <ThemePreviewCard
+                key={o.value}
+                mode={o.value}
+                label={o.label}
+                active={mode === o.value}
+                onClick={() => setMode(o.value)}
+              />
+            ))}
+          </div>
           <p className="mt-3 text-[0.8rem] text-muted">
             El tema se guarda en tu navegador y se aplica al recargar.
           </p>
@@ -98,7 +106,7 @@ export function SettingsPage() {
                 aria-readonly="true"
               />
             </Field>
-            <p className="text-[0.78rem] text-muted">
+            <p className="text-[0.72rem] text-faint">
               Estos valores son informativos y no se guardan como configuración de ejecución en
               el navegador.
             </p>
@@ -168,10 +176,8 @@ export function SettingsPage() {
               <Toggle checked={settings.webhookConfigured} disabled />
             </div>
             <div
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${
-                settings.githubAppId && settings.webhookConfigured
-                  ? "border-success/30 bg-success/10 text-success"
-                  : "border-medium/30 bg-medium/10 text-medium"
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-white ${
+                settings.githubAppId && settings.webhookConfigured ? "bg-success" : "bg-medium"
               }`}
             >
               {settings.githubAppId && settings.webhookConfigured ? (

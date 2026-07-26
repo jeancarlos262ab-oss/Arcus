@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 
@@ -15,7 +16,7 @@ interface KpiCardProps {
 }
 
 /** Tarjeta de métrica principal (KPI). */
-export function KpiCard({
+export const KpiCard = memo(function KpiCard({
   label,
   value,
   icon: Icon,
@@ -31,20 +32,16 @@ export function KpiCard({
   const DeltaIcon = trend === "up" ? ArrowUpRight : trend === "down" ? ArrowDownRight : Minus;
 
   return (
-    <div
-      className={`panel panel-hover animate-fade-up p-5 ${
-        accent ? "border-l-2 border-l-accent" : ""
-      }`}
-    >
+    <div className={`panel animate-fade-up p-4 ${accent ? "border-l-2 border-l-accent" : ""}`}>
       <div className="flex items-center justify-between">
         <span className="text-[0.72rem] font-semibold uppercase tracking-wider text-muted">
           {label}
         </span>
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-surface-2 text-accent">
-          <Icon size={16} strokeWidth={2.2} />
+        <span className="grid h-8 w-8 place-items-center rounded-md bg-ink text-bg">
+          <Icon size={15} strokeWidth={2.2} />
         </span>
       </div>
-      <div className="mt-3 text-3xl font-extrabold tracking-tight text-ink">{value}</div>
+      <div className="mt-2.5 text-2xl font-extrabold tracking-tight text-ink">{value}</div>
       {delta && (
         <div className={`mt-1.5 flex items-center gap-1 text-xs font-semibold ${deltaColor}`}>
           <DeltaIcon size={14} />
@@ -53,4 +50,4 @@ export function KpiCard({
       )}
     </div>
   );
-}
+});

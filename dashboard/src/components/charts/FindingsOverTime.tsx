@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   Area,
   AreaChart,
@@ -16,7 +17,7 @@ interface Props {
 }
 
 /** Área apilada de hallazgos por severidad a lo largo del tiempo. */
-export function FindingsOverTime({ data }: Props) {
+export const FindingsOverTime = memo(function FindingsOverTime({ data }: Props) {
   const { p } = useTheme();
 
   if (data.length === 0) {
@@ -70,4 +71,4 @@ export function FindingsOverTime({ data }: Props) {
       </AreaChart>
     </ResponsiveContainer>
   );
-}
+});

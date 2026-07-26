@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   Bar,
   BarChart,
@@ -18,7 +19,7 @@ interface Props {
 }
 
 /** Barras horizontales de hallazgos por tipo. */
-export function FindingsByType({ totals }: Props) {
+export const FindingsByType = memo(function FindingsByType({ totals }: Props) {
   const { p } = useTheme();
   const data = (Object.keys(totals) as FindingType[])
     .map((t) => ({ type: t, label: TYPE_LABEL[t], value: totals[t] }))
@@ -61,4 +62,4 @@ export function FindingsByType({ totals }: Props) {
       </BarChart>
     </ResponsiveContainer>
   );
-}
+});

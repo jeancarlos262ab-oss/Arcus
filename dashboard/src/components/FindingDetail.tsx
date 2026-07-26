@@ -56,7 +56,7 @@ export function FindingDetail({ run, findings }: FindingDetailProps) {
           {findings.length} hallazgo{findings.length === 1 ? "" : "s"}
         </div>
         {findings.length === 0 ? (
-          <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-2.5 text-sm text-success">
+          <div className="flex items-center gap-2 rounded-lg bg-success px-3 py-2.5 text-sm font-semibold text-white">
             <Check size={16} />
             No se detectaron problemas en este PR.
           </div>

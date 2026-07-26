@@ -42,11 +42,16 @@ interface PersistShape {
 
 const STORAGE_KEY = "arcus.store.v1";
 
+/**
+ * Normaliza settings cargadas de localStorage: la región, el modelo, el
+ * App ID de GitHub y el estado del webhook son propiedad del backend
+ * desplegado, nunca del navegador, así que siempre se fuerzan al valor
+ * actual en vez de leerse de un guardado previo.
+ */
 function normalizeSettings(settings: Partial<Settings> | undefined): Settings {
   return {
     ...DEFAULT_SETTINGS,
     ...settings,
-    // Runtime and integration status are backend-owned, never browser-owned.
     region: RUNTIME_CONFIG.region,
     modelId: RUNTIME_CONFIG.modelId,
     githubAppId: DEFAULT_SETTINGS.githubAppId,

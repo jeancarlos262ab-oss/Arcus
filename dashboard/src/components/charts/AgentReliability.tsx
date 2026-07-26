@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useTheme } from "@/state/ThemeProvider";
 
 interface Props {
@@ -5,7 +6,7 @@ interface Props {
 }
 
 /** Barras de fiabilidad por agente (% de corridas en OK). Barras HTML puras. */
-export function AgentReliability({ data }: Props) {
+export const AgentReliability = memo(function AgentReliability({ data }: Props) {
   const { p } = useTheme();
   return (
     <div className="space-y-3.5">
@@ -28,4 +29,4 @@ export function AgentReliability({ data }: Props) {
       })}
     </div>
   );
-}
+});

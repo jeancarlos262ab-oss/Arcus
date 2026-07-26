@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
-import { Maximize2, Minus, Plus } from "lucide-react";
+import { Expand, Maximize2, Minus, Plus, Shrink } from "lucide-react";
 import { alpha, nodeKindColor } from "@/lib/theme";
 import { useTheme } from "@/state/ThemeProvider";
 import type { NodeKind, RepoGraph } from "@/lib/types";
@@ -26,6 +26,8 @@ interface GraphViewProps {
   graph: RepoGraph;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  /** Tipos de nodo ocultos por los chips-filtro de la leyenda (ver GraphPage). */
+  hiddenKinds?: Set<NodeKind>;
 }
 
 /**
@@ -34,31 +36,36 @@ interface GraphViewProps {
  * rendimiento. El dibujo de nodos y el resaltado de vecinos son personalizados
  * y siguen el tema activo (claro/oscuro).
  */
-export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
+export function GraphView({ graph, selectedId, onSelect, hiddenKinds }: GraphViewProps) {
   const { p, resolved } = useTheme();
   const fgRef = useRef<ForceGraphMethods<GNode, GLink>>();
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 800, h: 560 });
+  const [size, setSize] = useState({ w: 800, h: 420 });
   const [hovered, setHovered] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Datos en el formato de la librería. Se clonan para que la simulación mute
-  // sus propias copias (no los datos del store).
-  const data = useMemo(
-    () => ({
-      nodes: graph.nodes.map<GNode>((n) => ({
+  // sus propias copias (no los datos del store). Los tipos de nodo apagados
+  // desde la leyenda (chips-filtro) se excluyen junto con sus aristas.
+  const data = useMemo(() => {
+    const visibleNodes = graph.nodes.filter((n) => !hiddenKinds?.has(n.kind));
+    const visibleIds = new Set(visibleNodes.map((n) => n.id));
+    return {
+      nodes: visibleNodes.map<GNode>((n) => ({
         id: n.id,
         kind: n.kind,
         name: n.name,
         val: RADIUS[n.kind],
       })),
-      links: graph.links.map<GLink>((l) => ({
-        source: l.source,
-        target: l.target,
-        type: l.type,
-      })),
-    }),
-    [graph],
-  );
+      links: graph.links
+        .filter((l) => visibleIds.has(l.source) && visibleIds.has(l.target))
+        .map<GLink>((l) => ({
+          source: l.source,
+          target: l.target,
+          type: l.type,
+        })),
+    };
+  }, [graph, hiddenKinds]);
 
   const adjacency = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -70,7 +77,8 @@ export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
     return map;
   }, [graph]);
 
-  // Tamaño responsivo del contenedor.
+  // Tamaño responsivo del contenedor (incluye el cambio de tamaño al entrar/
+  // salir de pantalla completa, ya que ResizeObserver lo captura solo).
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -82,7 +90,31 @@ export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Física estilo Obsidian + encuadre inicial.
+  // Sincroniza el estado con la Fullscreen API nativa del navegador (permite
+  // salir con Esc y mantiene el ícono correcto en cualquier caso). Al cambiar
+  // reencuadra el grafo para el nuevo tamaño del contenedor.
+  useEffect(() => {
+    const handler = () => {
+      setIsFullscreen(document.fullscreenElement === wrapRef.current);
+      setTimeout(() => fgRef.current?.zoomToFit(400, 50), 120);
+    };
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      el.requestFullscreen();
+    }
+  }, []);
+
+  // Física estilo Obsidian + encuadre inicial. Se reencuadra también cuando
+  // cambian los filtros de tipo de nodo (`hiddenKinds`), ya que la cantidad
+  // de nodos visibles cambia.
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg) return;
@@ -90,7 +122,7 @@ export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
     fg.d3Force("link")?.distance(42);
     const t = setTimeout(() => fg.zoomToFit(500, 50), 400);
     return () => clearTimeout(t);
-  }, [graph]);
+  }, [graph, hiddenKinds]);
 
   // Al cambiar de tema, reactiva la simulación para repintar con los colores
   // nuevos sin perder las posiciones actuales.
@@ -114,7 +146,10 @@ export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
   const fit = () => fgRef.current?.zoomToFit(400, 50);
 
   return (
-    <div ref={wrapRef} className="relative h-[560px] w-full">
+    <div
+      ref={wrapRef}
+      className={`relative h-[420px] w-full bg-bg ${isFullscreen ? "h-screen w-screen" : ""}`}
+    >
       <ForceGraph2D<GNode, GLink>
         ref={fgRef}
         width={size.w}
@@ -203,6 +238,13 @@ export function GraphView({ graph, selectedId, onSelect }: GraphViewProps) {
         <div className="h-px bg-border" />
         <CtrlBtn onClick={fit} title="Ajustar a la vista">
           <Maximize2 size={14} />
+        </CtrlBtn>
+        <div className="h-px bg-border" />
+        <CtrlBtn
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+        >
+          {isFullscreen ? <Shrink size={14} /> : <Expand size={14} />}
         </CtrlBtn>
       </div>
 

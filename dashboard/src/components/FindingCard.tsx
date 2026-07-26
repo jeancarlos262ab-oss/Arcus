@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Lightbulb, ShieldAlert } from "lucide-react";
 import type { Finding } from "@/lib/types";
 import { typeColor, TYPE_LABEL } from "@/lib/theme";
@@ -10,8 +11,14 @@ interface FindingCardProps {
   prRef?: string;
 }
 
-/** Tarjeta de un hallazgo con su fix sugerido (diff coloreado). */
-export function FindingCard({ finding, prRef }: FindingCardProps) {
+/**
+ * Tarjeta de un hallazgo con su fix sugerido (diff coloreado).
+ *
+ * Memoizada: en la vista de Hallazgos se renderizan potencialmente decenas de
+ * tarjetas y solo deben re-renderizar cuando su propio `finding` cambia, no
+ * cuando cambian los filtros de las demás.
+ */
+function FindingCardBase({ finding, prRef }: FindingCardProps) {
   const { p } = useTheme();
   return (
     <article className="rounded-xl border border-border bg-surface p-4">
@@ -76,3 +83,5 @@ export function FindingCard({ finding, prRef }: FindingCardProps) {
     </article>
   );
 }
+
+export const FindingCard = memo(FindingCardBase);

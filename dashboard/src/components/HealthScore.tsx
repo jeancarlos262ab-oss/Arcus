@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useTheme } from "@/state/ThemeProvider";
 
 interface HealthScoreProps {
@@ -5,10 +6,12 @@ interface HealthScoreProps {
 }
 
 /** Anillo de puntaje de salud del repo (SVG puro, adaptado al tema). */
-export function HealthScore({ score }: HealthScoreProps) {
+export const HealthScore = memo(function HealthScore({ score }: HealthScoreProps) {
   const { p } = useTheme();
-  const radius = 62;
-  const stroke = 12;
+  const size = 128;
+  const center = size / 2;
+  const radius = 50;
+  const stroke = 10;
   const circ = 2 * Math.PI * radius;
   const clamped = Math.max(0, Math.min(100, score));
   const offset = circ - (clamped / 100) * circ;
@@ -19,11 +22,18 @@ export function HealthScore({ score }: HealthScoreProps) {
   return (
     <div className="flex flex-col items-center">
       <div className="relative">
-        <svg width="160" height="160" viewBox="0 0 160 160">
-          <circle cx="80" cy="80" r={radius} fill="none" stroke={p.border} strokeWidth={stroke} />
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           <circle
-            cx="80"
-            cy="80"
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="none"
+            stroke={p.border}
+            strokeWidth={stroke}
+          />
+          <circle
+            cx={center}
+            cy={center}
             r={radius}
             fill="none"
             stroke={color}
@@ -31,13 +41,13 @@ export function HealthScore({ score }: HealthScoreProps) {
             strokeLinecap="round"
             strokeDasharray={circ}
             strokeDashoffset={offset}
-            transform="rotate(-90 80 80)"
+            transform={`rotate(-90 ${center} ${center})`}
             style={{ transition: "stroke-dashoffset 0.8s ease" }}
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-4xl font-extrabold tracking-tight text-ink">{clamped}</span>
-          <span className="text-[0.68rem] font-semibold uppercase tracking-wider text-faint">
+          <span className="text-3xl font-extrabold tracking-tight text-ink">{clamped}</span>
+          <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-faint">
             / 100
           </span>
         </div>
@@ -47,4 +57,4 @@ export function HealthScore({ score }: HealthScoreProps) {
       </span>
     </div>
   );
-}
+});
