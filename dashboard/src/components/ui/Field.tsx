@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import * as SwitchPrimitive from "@radix-ui/react-switch";
 
 /** Etiqueta + control de formulario con descripción opcional. */
 export function Field({
@@ -48,7 +49,13 @@ export function Select<T extends string>({ value, onChange, options }: SelectPro
   );
 }
 
-/** Interruptor on/off accesible. */
+/**
+ * Interruptor on/off accesible, sobre Radix UI (`@radix-ui/react-switch`).
+ *
+ * Radix maneja el estado, el teclado y el foco de forma nativa; el thumb usa
+ * `translate-x-full` dentro de un track de ancho fijo para que nunca se
+ * salga del contenedor, sin importar el tema.
+ */
 export function Toggle({
   checked,
   onChange,
@@ -58,32 +65,23 @@ export function Toggle({
   checked: boolean;
   onChange?: (v: boolean) => void;
   label?: string;
+  /** Bloquea la interacción cuando el valor lo controla el backend, no el navegador. */
   disabled?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => {
-        if (!disabled) onChange?.(!checked);
-      }}
-      className={`focus-ring flex items-center gap-2.5 ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+    <label
+      className={`flex items-center gap-2.5 ${disabled ? "cursor-not-allowed opacity-75" : ""}`}
     >
-      <span
-        className={`relative h-5 w-9 rounded-full transition-colors ${
-          checked ? "bg-accent" : "bg-border-strong"
-        }`}
+      <SwitchPrimitive.Root
+        checked={checked}
+        onCheckedChange={onChange}
+        disabled={disabled}
+        className="focus-ring relative h-5 w-9 shrink-0 rounded-full bg-border-strong outline-none transition-colors data-[state=checked]:bg-accent data-[disabled]:cursor-not-allowed"
       >
-        <span
-          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-            checked ? "translate-x-4" : "translate-x-0.5"
-          }`}
-        />
-      </span>
+        <SwitchPrimitive.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-white shadow transition-transform duration-150 will-change-transform data-[state=checked]:translate-x-[18px]" />
+      </SwitchPrimitive.Root>
       {label && <span className="text-sm text-ink">{label}</span>}
-    </button>
+    </label>
   );
 }
 
@@ -104,7 +102,7 @@ export function Segmented<T extends string>({
           key={o.value}
           onClick={() => onChange(o.value)}
           className={`focus-ring flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-            value === o.value ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"
+            value === o.value ? "bg-accent text-bg" : "text-muted hover:text-ink"
           }`}
         >
           {o.icon}

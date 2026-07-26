@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { severityColor, SEVERITY_LABEL } from "@/lib/theme";
 import { useTheme } from "@/state/ThemeProvider";
@@ -9,7 +10,7 @@ interface Props {
 }
 
 /** Donut de distribución por severidad con total al centro. */
-export function SeverityDonut({ totals }: Props) {
+export const SeverityDonut = memo(function SeverityDonut({ totals }: Props) {
   const { p } = useTheme();
   const data = (["high", "medium", "low"] as Severity[])
     .map((s) => ({ name: SEVERITY_LABEL[s], value: totals[s], key: s }))
@@ -57,4 +58,4 @@ export function SeverityDonut({ totals }: Props) {
       </div>
     </div>
   );
-}
+});

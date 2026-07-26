@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
 import { Header } from "@/components/Header";
@@ -8,6 +8,16 @@ import { useStore } from "@/state/StoreProvider";
 import { filterRuns, rangeFromKey } from "@/lib/selectors";
 import { SEVERITY_LABEL, TYPE_LABEL } from "@/lib/theme";
 import type { Finding, FindingType, Severity } from "@/lib/types";
+
+/** Retrasa la propagación de un valor para no recalcular en cada tecleo. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 type SevFilter = Severity | "all";
 type TypeFilter = FindingType | "all";
@@ -22,6 +32,7 @@ export function FindingsPage() {
   const [sev, setSev] = useState<SevFilter>("all");
   const [type, setType] = useState<TypeFilter>("all");
   const [query, setQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(query, 200);
 
   const { range } = useMemo(() => rangeFromKey(rangeKey), [rangeKey]);
 
@@ -38,14 +49,14 @@ export function FindingsPage() {
   }, [runs, selectedRepo, range, getFindings]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     return all.filter((f) => {
       if (sev !== "all" && f.severity !== sev) return false;
       if (type !== "all" && f.type !== type) return false;
       if (q && !(`${f.title} ${f.rationale} ${f.file}`.toLowerCase().includes(q))) return false;
       return true;
     });
-  }, [all, sev, type, query]);
+  }, [all, sev, type, debouncedQuery]);
 
   const counts = useMemo(() => {
     const c = { high: 0, medium: 0, low: 0 };
@@ -105,7 +116,7 @@ export function FindingsPage() {
   );
 }
 
-function FilterPills<T extends string>({
+function FilterPillsBase<T extends string>({
   value,
   onChange,
   options,
@@ -120,10 +131,10 @@ function FilterPills<T extends string>({
         <button
           key={o.value}
           onClick={() => onChange(o.value)}
-          className={`focus-ring rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+          className={`focus-ring rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
             value === o.value
-              ? "border-accent bg-accent/10 text-accent"
-              : "border-border bg-surface text-muted hover:text-ink"
+              ? "bg-accent text-bg"
+              : "border border-border bg-surface text-muted hover:text-ink"
           }`}
         >
           {o.label}
@@ -132,3 +143,5 @@ function FilterPills<T extends string>({
     </div>
   );
 }
+
+const FilterPills = memo(FilterPillsBase) as typeof FilterPillsBase;

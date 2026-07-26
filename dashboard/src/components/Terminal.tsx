@@ -6,6 +6,7 @@ interface TerminalProps {
   lines: LogLine[];
   running: boolean;
   title?: string;
+  className?: string;
 }
 
 const LEVEL_CLASS: Record<LogLevel, string> = {
@@ -16,7 +17,12 @@ const LEVEL_CLASS: Record<LogLevel, string> = {
 };
 
 /** Consola que muestra el stream de logs del pipeline en vivo. */
-export function Terminal({ lines, running, title = "pipeline · ejecución en vivo" }: TerminalProps) {
+export function Terminal({
+  lines,
+  running,
+  title = "pipeline · ejecución en vivo",
+  className = "",
+}: TerminalProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,7 +30,7 @@ export function Terminal({ lines, running, title = "pipeline · ejecución en vi
   }, [lines.length]);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border bg-bg">
+    <div className={`flex h-full flex-col overflow-hidden rounded-xl border border-border bg-bg ${className}`}>
       {/* Barra de título estilo terminal */}
       <div className="flex items-center gap-2 border-b border-border bg-surface px-3.5 py-2.5">
         <div className="flex gap-1.5">
@@ -45,7 +51,7 @@ export function Terminal({ lines, running, title = "pipeline · ejecución en vi
       </div>
 
       {/* Cuerpo */}
-      <div className="h-[340px] overflow-y-auto p-3.5 font-mono text-[0.78rem] leading-relaxed">
+      <div className="min-h-[170px] flex-1 overflow-y-auto p-3 font-mono text-[0.74rem] leading-relaxed">
         {lines.length === 0 ? (
           <p className="text-faint">
             $ Esperando ejecución… pulsa <span className="text-accent">Ejecutar revisión</span>.

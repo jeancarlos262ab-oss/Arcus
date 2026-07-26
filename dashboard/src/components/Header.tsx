@@ -35,12 +35,12 @@ export function Header({
         <div className="flex items-center gap-2 text-xs font-medium text-muted">
           <Github size={14} />
           {owner}
-          <span className="chip ml-1 border border-accent/35 bg-accent/10 text-accent">
+          <span className="chip ml-1 bg-accent text-bg">
             <FlaskConical size={12} />
             Simulado
           </span>
         </div>
-        <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-ink">{title}</h1>
+        <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-ink">{title}</h1>
         <p className="mt-1 text-sm text-muted">{subtitle}</p>
       </div>
 
@@ -52,7 +52,7 @@ export function Header({
                 key={r.key}
                 onClick={() => onRangeChange(r.key)}
                 className={`focus-ring rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  rangeKey === r.key ? "bg-surface-2 text-ink" : "text-muted hover:text-ink"
+                  rangeKey === r.key ? "bg-accent text-bg" : "text-muted hover:text-ink"
                 }`}
               >
                 {r.label}

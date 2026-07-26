@@ -15,6 +15,9 @@ export function GraphPage() {
   const { selectedRepo } = useStore();
   const { p } = useTheme();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Tipos de nodo apagados desde la leyenda (chips-filtro): se ocultan del
+  // grafo hasta que se vuelvan a activar.
+  const [hiddenKinds, setHiddenKinds] = useState<Set<NodeKind>>(() => new Set());
 
   const graph = useMemo(() => getGraph(selectedRepo), [selectedRepo]);
 
@@ -23,6 +26,24 @@ export function GraphPage() {
     for (const n of graph.nodes) c[n.kind] += 1;
     return c;
   }, [graph]);
+
+  const toggleKind = (k: NodeKind) => {
+    const isCurrentlyHidden = hiddenKinds.has(k);
+    setHiddenKinds((prev) => {
+      const next = new Set(prev);
+      if (isCurrentlyHidden) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+    // Si se está ocultando este tipo y el nodo seleccionado es de ese tipo,
+    // limpia la selección para que el panel de detalle no quede "huérfano".
+    if (!isCurrentlyHidden) {
+      setSelectedId((id) => {
+        const node = id ? graph.nodes.find((n) => n.id === id) : null;
+        return node?.kind === k ? null : id;
+      });
+    }
+  };
 
   const selectedNode = graph.nodes.find((n) => n.id === selectedId) ?? null;
   const selectedEdges = selectedNode
@@ -50,22 +71,38 @@ export function GraphPage() {
             title="Estructura del repositorio"
             subtitle="Zoom con la rueda · arrastra el fondo para desplazar · arrastra nodos · pasa el cursor para resaltar"
             action={
-              <div className="flex flex-wrap gap-2.5">
-                {(Object.keys(NODE_KIND_LABEL) as NodeKind[]).map((k) => (
-                  <span key={k} className="flex items-center gap-1.5 text-[0.72rem] text-muted">
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ background: nodeKindColor(p, k) }}
-                    />
-                    {NODE_KIND_LABEL[k]}
-                    <span className="text-faint">{counts[k]}</span>
-                  </span>
-                ))}
+              <div className="flex flex-wrap gap-1.5">
+                {(Object.keys(NODE_KIND_LABEL) as NodeKind[]).map((k) => {
+                  const off = hiddenKinds.has(k);
+                  const color = nodeKindColor(p, k);
+                  return (
+                    <button
+                      key={k}
+                      onClick={() => toggleKind(k)}
+                      title={off ? `Mostrar ${NODE_KIND_LABEL[k]}` : `Ocultar ${NODE_KIND_LABEL[k]}`}
+                      className={`focus-ring flex items-center gap-1.5 rounded-full px-1.5 py-1 text-[0.72rem] font-medium transition-colors ${
+                        off ? "text-faint" : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ background: off ? "var(--faint)" : color, opacity: off ? 0.5 : 1 }}
+                      />
+                      {NODE_KIND_LABEL[k]}
+                      <span className="text-faint">{counts[k]}</span>
+                    </button>
+                  );
+                })}
               </div>
             }
           >
             <div className="overflow-hidden rounded-xl border border-border bg-bg">
-              <GraphView graph={graph} selectedId={selectedId} onSelect={setSelectedId} />
+              <GraphView
+                graph={graph}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+                hiddenKinds={hiddenKinds}
+              />
             </div>
           </Panel>
         </div>
