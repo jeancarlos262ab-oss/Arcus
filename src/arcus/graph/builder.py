@@ -22,6 +22,24 @@ from arcus.contracts import (
 )
 
 PYTHON_LANGUAGE = Language(get_python_language())
+_IGNORED_DIRECTORY_NAMES = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".mypy_cache",
+        ".nox",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "site-packages",
+        "venv",
+    }
+)
 
 
 class GraphBuilder:
@@ -55,10 +73,17 @@ class GraphBuilder:
         return self._graph()
 
     def parse_directory(self, directory: Path) -> RepoGraph:
-        """Parse Python files and connect cross-file semantic relationships."""
+        """Parse repository Python files without generated or dependency trees."""
 
         self.reset()
-        for file_path in sorted(directory.rglob("*.py")):
+        root = directory.resolve()
+        for file_path in sorted(root.rglob("*.py")):
+            relative_directories = file_path.relative_to(root).parts[:-1]
+            if any(
+                directory_name.casefold() in _IGNORED_DIRECTORY_NAMES
+                for directory_name in relative_directories
+            ):
+                continue
             self._parse_file_into_graph(file_path)
         self._extract_semantic_links()
         return self._graph()

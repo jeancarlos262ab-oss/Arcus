@@ -204,16 +204,18 @@ class WebhookHandler:
             if raw_github_event is None
             else "other"
         )
-        signature_context = {
+        request_context = {
             "github_event": github_event,
             "delivery_id_present": bool(headers.get("x-github-delivery")),
         }
+        logger.info("webhook_received", extra=request_context)
+
         signature = headers.get("x-hub-signature-256")
         if not signature:
             logger.warning(
                 "webhook_signature_missing",
                 extra={
-                    **signature_context,
+                    **request_context,
                     "signature_present": False,
                     "signature_format_valid": False,
                 },
@@ -223,8 +225,24 @@ class WebhookHandler:
         try:
             body = _raw_body(event, max_bytes=self._settings.max_body_bytes)
         except WebhookBodyTooLargeError as error:
+            logger.warning(
+                "webhook_body_rejected",
+                extra={
+                    **request_context,
+                    "reason": "body_too_large",
+                    "error_type": type(error).__name__,
+                },
+            )
             return _response(413, {"message": str(error)})
         except WebhookPayloadError as error:
+            logger.warning(
+                "webhook_body_rejected",
+                extra={
+                    **request_context,
+                    "reason": "invalid_body",
+                    "error_type": type(error).__name__,
+                },
+            )
             return _response(400, {"message": str(error)})
 
         try:
@@ -232,7 +250,10 @@ class WebhookHandler:
         except (BotoCoreError, ClientError, ValueError) as error:
             logger.exception(
                 "webhook_secret_lookup_failed",
-                extra={"error_type": type(error).__name__},
+                extra={
+                    **request_context,
+                    "error_type": type(error).__name__,
+                },
             )
             return _response(500, {"message": "webhook configuration unavailable"})
 
@@ -247,36 +268,77 @@ class WebhookHandler:
                     else "webhook_signature_malformed"
                 ),
                 extra={
-                    **signature_context,
+                    **request_context,
                     "signature_present": True,
                     "signature_format_valid": signature_format_valid,
                 },
             )
             return _response(401, {"message": "invalid webhook signature"})
 
+        logger.info(
+            "webhook_signature_verified",
+            extra={**request_context, "body_size_bytes": len(body)},
+        )
+
         try:
             payload = _json_payload(body)
+        except (UnicodeDecodeError, json.JSONDecodeError, WebhookPayloadError) as error:
+            logger.warning(
+                "webhook_payload_rejected",
+                extra={
+                    **request_context,
+                    "reason": "invalid_json",
+                    "error_type": type(error).__name__,
+                },
+            )
+            return _response(400, {"message": str(error)})
+
+        raw_action = payload.get("action")
+        github_action = (
+            raw_action
+            if isinstance(raw_action, str) and raw_action in {"opened", "synchronize"}
+            else "missing"
+            if raw_action is None
+            else "other"
+        )
+        event_context = {**request_context, "github_action": github_action}
+        try:
             parsed_event = parse_pull_request_event(
                 headers.get("x-github-event"), payload
             )
-        except (UnicodeDecodeError, json.JSONDecodeError, WebhookPayloadError) as error:
+        except WebhookPayloadError as error:
+            logger.warning(
+                "webhook_payload_rejected",
+                extra={
+                    **event_context,
+                    "reason": "invalid_pull_request_payload",
+                    "error_type": type(error).__name__,
+                },
+            )
             return _response(400, {"message": str(error)})
 
         if parsed_event is None:
+            logger.info("webhook_event_ignored", extra=event_context)
             return _response(202, {"message": "event ignored"})
 
         delivery_id = headers.get("x-github-delivery", "")
         if not _DELIVERY_ID_PATTERN.fullmatch(delivery_id):
+            logger.warning("webhook_delivery_id_rejected", extra=event_context)
             return _response(400, {"message": "invalid or missing GitHub delivery ID"})
 
+        pr_id = f"{parsed_event.repo_full_name}#{parsed_event.pr_number}"
+        delivery_context = {
+            **event_context,
+            "delivery_id": delivery_id,
+            "repo": parsed_event.repo_full_name,
+            "pr_id": pr_id,
+            "pr_number": parsed_event.pr_number,
+            "installation_id": parsed_event.installation_id,
+        }
+        logger.info("webhook_event_validated", extra=delivery_context)
+
         if not self._admission_store.policy.allows(parsed_event):
-            logger.warning(
-                "webhook_not_allowed",
-                extra={
-                    "repo": parsed_event.repo_full_name,
-                    "installation_id": parsed_event.installation_id,
-                },
-            )
+            logger.warning("webhook_not_allowed", extra=delivery_context)
             return _response(202, {"message": "event ignored by admission policy"})
 
         candidate_claim = _build_execution_claim(
@@ -291,24 +353,36 @@ class WebhookHandler:
         except (BotoCoreError, ClientError, ValueError) as error:
             logger.exception(
                 "webhook_admission_failed",
-                extra={"error_type": type(error).__name__},
+                extra={
+                    **delivery_context,
+                    "correlation_id": str(candidate_claim.pipeline_run_id),
+                    "error_type": type(error).__name__,
+                },
             )
             return _response(500, {"message": "unable to record webhook"})
 
+        admission_context = {
+            **delivery_context,
+            "admission_status": admission.status.value,
+        }
+        logger.info("webhook_admission_resolved", extra=admission_context)
+
         if admission.status is AdmissionStatus.QUOTA_EXCEEDED:
-            logger.warning(
-                "webhook_quota_exceeded",
-                extra={
-                    "repo": parsed_event.repo_full_name,
-                    "installation_id": parsed_event.installation_id,
-                },
-            )
+            logger.warning("webhook_quota_exceeded", extra=admission_context)
             return _response(202, {"message": "review quota reached"})
 
         execution_claim = admission.claim
         if execution_claim is None:
+            logger.error("webhook_admission_missing_claim", extra=admission_context)
             return _response(500, {"message": "unable to record webhook"})
 
+        pipeline_context = {
+            **admission_context,
+            "correlation_id": str(execution_claim.pipeline_run_id),
+            "pipeline_run_id": str(execution_claim.pipeline_run_id),
+            "state_machine_arn": self._settings.state_machine_arn,
+        }
+        logger.info("pipeline_start_requested", extra=pipeline_context)
         try:
             self._step_functions_client.start_execution(
                 stateMachineArn=self._settings.state_machine_arn,
@@ -317,18 +391,29 @@ class WebhookHandler:
             )
         except ClientError as error:
             if _has_error_code(error, "ExecutionAlreadyExists"):
+                logger.info("pipeline_execution_already_exists", extra=pipeline_context)
                 return _duplicate_response(execution_claim)
             logger.exception(
-                "pipeline_start_failed", extra={"error_type": type(error).__name__}
+                "pipeline_start_failed",
+                extra={
+                    **pipeline_context,
+                    "error_type": type(error).__name__,
+                },
             )
             return _response(500, {"message": "unable to start review pipeline"})
         except BotoCoreError as error:
             logger.exception(
-                "pipeline_start_failed", extra={"error_type": type(error).__name__}
+                "pipeline_start_failed",
+                extra={
+                    **pipeline_context,
+                    "error_type": type(error).__name__,
+                },
             )
             return _response(500, {"message": "unable to start review pipeline"})
 
+        logger.info("pipeline_started", extra=pipeline_context)
         if admission.status is AdmissionStatus.DUPLICATE:
+            logger.info("webhook_duplicate_acknowledged", extra=pipeline_context)
             return _duplicate_response(execution_claim)
         return _response(
             202,

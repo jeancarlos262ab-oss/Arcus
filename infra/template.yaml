@@ -333,7 +333,8 @@ Resources:
               Effect: Allow
               Action:
                 - dynamodb:GetItem
-                - dynamodb:TransactWriteItems
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
               Resource: !GetAtt ReviewHistoryTable.Arn
             - Sid: StartReviewPipeline
               Effect: Allow
