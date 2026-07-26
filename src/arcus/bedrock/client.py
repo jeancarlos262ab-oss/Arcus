@@ -342,14 +342,35 @@ def _require_mapping(value: object, path: str) -> Mapping[str, object]:
 
 
 def _strip_code_fence(text: str) -> str:
-    """Remove one complete JSON Markdown fence without altering valid JSON."""
+    """Extract one complete JSON fence without altering plain JSON text."""
 
-    if not text.startswith("```"):
-        return text
     lines = text.splitlines()
-    if len(lines) < 3 or not lines[-1].strip().startswith("```"):
+    opening_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip().lower() in {"```", "```json"}
+        ),
+        None,
+    )
+    if opening_index is None:
         return text
-    return "\n".join(lines[1:-1]).strip()
+
+    closing_index = next(
+        (
+            index
+            for index in range(opening_index + 1, len(lines))
+            if lines[index].strip() == "```"
+        ),
+        None,
+    )
+    if closing_index is None:
+        return text
+
+    candidate = "\n".join(lines[opening_index + 1 : closing_index]).strip()
+    if not candidate.startswith(("{", "[")):
+        return text
+    return candidate
 
 
 def _client_error_code(error: ClientError) -> str:
