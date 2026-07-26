@@ -81,7 +81,7 @@ nadie al principio. Es quien despliega, así que coordina los nombres de recurso
 **Dueño de:** `agents/`, `bedrock/`, `graph/`. Es el corazón técnico y el frente más pesado.
 
 Qué hace:
-- B1: `bedrock/client.py` — `invoke_claude()` con retry + parseo. _Día 1._
+- B1: `bedrock/client.py` — `invoke_model()` mediante Bedrock Converse con retry + parseo. _Día 1._
 - B2: `graph/builder.py` — tree-sitter (Python) → networkx + detección de convenciones.
 - B3: `graph/store.py` (S3) + `graph/query.py` (subgrafo 1 salto).
 - B4: agente **Context Builder**.

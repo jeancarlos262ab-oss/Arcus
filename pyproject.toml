@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools==83.0.0", "wheel==0.47.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,15 +10,12 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic==2.13.4",
     "boto3==1.43.55",
-    "tenacity==9.1.4",
-    "requests==2.34.2",
     "tree-sitter==0.26.0",
     "tree-sitter-python==0.25.0",
-    "networkx==3.6.1",
     "pyjwt[crypto]==2.10.1",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "ruff==0.16.0",
     "mypy==2.3.0",
@@ -26,36 +23,47 @@ dev = [
     "pytest-mock==3.15.1",
     "pytest-cov==7.1.0",
     "responses==0.26.2",
-    "moto[dynamodb,secretsmanager,stepfunctions]==5.2.2",
-    "hatchling==1.31.0",
-]
-graph = [
-    "tree-sitter==0.26.0",
-    "tree-sitter-python==0.25.0",
-    "networkx==3.6.1",
+    "moto[dynamodb,s3,secretsmanager,stepfunctions]==5.2.2",
 ]
 
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-exclude = [".git", ".venv", "venv", "__pycache__", "build", "dist"]
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "tests/fixtures/sample_module_a.py",
+    "tests/fixtures/sample_module_b.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP"]
-ignore = ["E501"]  # line too long — handled by formatter
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/arcus/bedrock/client.py" = ["N803"]
+"src/arcus/entrypoints/webhook_handler.py" = ["N803"]
+"src/arcus/secrets.py" = ["N803"]
+"src/arcus/storage/admission.py" = ["N803"]
+"src/arcus/storage/artifacts.py" = ["N803"]
+"src/arcus/storage/history.py" = ["N803"]
 
 [tool.mypy]
 python_version = "3.12"
-check_untyped_defs = true
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = false
 
 [[tool.mypy.overrides]]
-module = ["moto.*", "responses.*", "networkx", "tree_sitter.*"]
+module = ["arcus.contracts.*", "arcus.graph.*", "arcus.github.*"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["boto3", "botocore.*", "tree_sitter"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -63,4 +71,7 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --tb=short --strict-markers"
+addopts = "-v --tb=short --strict-markers --import-mode=importlib"
+markers = [
+    "contract: validates a cross-stage or external-boundary contract",
+]

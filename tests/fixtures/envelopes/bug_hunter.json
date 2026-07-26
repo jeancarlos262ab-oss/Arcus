@@ -1,0 +1,66 @@
+{
+  "pipeline_run_id": "123e4567-e89b-42d3-a456-426614174000",
+  "created_at": "2026-07-21T10:00:00Z",
+  "pr": {
+    "repo_full_name": "acme/widgets",
+    "pr_number": 42,
+    "commit_sha": "abc123def4567890",
+    "installation_id": 123456,
+    "changed_files": ["src/config.py", "tests/test_config.py"],
+    "diff_ref": "s3://arcus-dev-context-artifacts/prs/acme/widgets/42/diff.patch"
+  },
+  "context": {
+    "status": "ok",
+    "error": null,
+    "graph_ref": "s3://arcus-dev-context-artifacts/graphs/acme/widgets/main.json",
+    "graph_version": "def456abc1237890",
+    "relevant_subgraph_ref": "s3://arcus-dev-context-artifacts/prs/acme/widgets/42/subgraph.json",
+    "conventions": {
+      "naming": "snake_case",
+      "error_handling": "custom_exceptions",
+      "test_framework": "pytest",
+      "notes": ["DTOs use Pydantic", "structured logging is preferred"]
+    },
+    "ran_diff_only": false
+  },
+  "consistency": {
+    "status": "ok",
+    "error": null,
+    "findings": [
+      {
+        "id": "223e4567-e89b-42d3-a456-426614174001",
+        "agent": "consistency_checker",
+        "type": "convention_violation",
+        "severity": "medium",
+        "file": "src/config.py",
+        "line_start": 16,
+        "line_end": 16,
+        "title": "Configuration loader bypasses the shared error policy",
+        "rationale": "The repository convention is to raise a typed configuration error at the boundary.",
+        "evidence_refs": ["src/config.py:16", "src/errors.py:4"],
+        "fix": null
+      }
+    ]
+  },
+  "bugs": {
+    "status": "ok",
+    "error": null,
+    "findings": [
+      {
+        "id": "323e4567-e89b-42d3-a456-426614174002",
+        "agent": "bug_hunter",
+        "type": "logic_bug",
+        "severity": "high",
+        "file": "src/config.py",
+        "line_start": 22,
+        "line_end": 22,
+        "title": "Retry backoff can exceed the configured maximum",
+        "rationale": "The exponent is applied before the cap conversion, allowing an oversized delay for large attempts.",
+        "evidence_refs": ["src/config.py:22", "src/review.py:11"],
+        "fix": null
+      }
+    ]
+  },
+  "fixes": {"status": "pending", "error": null, "findings": []},
+  "report": {"status": "pending", "error": null, "comment_url": null, "summary": null}
+}

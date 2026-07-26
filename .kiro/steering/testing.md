@@ -56,9 +56,9 @@ alcanzar cobertura perfecta. Priorizamos las costuras que rompen la demo si fall
 ## Comandos
 
 ```bash
-pytest tests/unit           # rápido, corre en cada commit
-pytest tests/integration    # antes de merge a main
-pytest -m contract          # solo los tests de contrato de agentes
+uv run pytest tests/unit           # rápido, corre en cada commit
+uv run pytest tests/integration    # antes de merge a main
+uv run pytest -m contract          # solo los tests de contrato de agentes
 ```
 
 Meta de cobertura: ~60% global, pero **100% de los tests de contrato de agentes verdes

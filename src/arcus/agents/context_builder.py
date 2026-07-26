@@ -1,179 +1,88 @@
-"""Context Builder Agent: Enriches envelope with code graph context for PR analysis."""
-import logging
-from typing import Any
+"""Context Builder stage backed by canonical graph artifacts."""
 
-from arcus.agents.base import agent_handler, mark_section_failed, mark_section_ok
-from arcus.contracts import ContextConventions, PipelineEnvelope
+from __future__ import annotations
+
+import logging
+from functools import lru_cache
+
+from arcus.agents.base import BaseAgent
+from arcus.agents.runtime import artifacts, settings
+from arcus.config import Settings
+from arcus.contracts import (
+    AgentStatus,
+    ContextSection,
+    PipelineEnvelope,
+    RepoGraph,
+)
 from arcus.graph import extract_subgraph
+from arcus.storage.artifacts import S3ArtifactStore
 
 logger = logging.getLogger(__name__)
 
 
-@agent_handler
-def handle_context_builder(envelope: PipelineEnvelope) -> PipelineEnvelope:
-    """
-    Context Builder Agent Handler.
+class ContextBuilderAgent(BaseAgent):
+    """Load a seeded repository graph and persist PR-specific context."""
 
-    Builds or queries the code graph for the PR's changed files and enriches
-    the envelope with context (conventions, graph references, subgraph).
+    section_name = "context"
+    failure_code = "context_builder_failed"
 
-    This is the first analysis agent in the pipeline. It populates the
-    `envelope.context` section with:
-    - status: 'ok' or 'failed'
-    - graph_ref: S3 reference to full graph (if available)
-    - graph_version: Commit SHA of graph
-    - relevant_subgraph_ref: S3 reference to subgraph for changed files
-    - conventions: Detected/configured code conventions
-    - error: If something failed
+    def __init__(
+        self,
+        artifact_store: S3ArtifactStore,
+        runtime_settings: Settings,
+    ) -> None:
+        """Create the stage with a bounded artifact store."""
 
-    Args:
-        envelope: Pipeline envelope with PR details.
+        super().__init__(runtime_settings)
+        self._artifacts = artifact_store
 
-    Returns:
-        Updated envelope with context section populated.
-    """
-    try:
-        # Step 1: Extract PR metadata
+    def process(self, envelope: PipelineEnvelope) -> PipelineEnvelope:
+        """Attach persisted graph references and detected conventions."""
+
         pr = envelope.pr
+        graph_key = f"graphs/{pr.repo_full_name}/main.json"
+        graph_ref = self._artifacts.reference(graph_key)
+        graph = RepoGraph.model_validate(self._artifacts.get_json(graph_ref))
+        if graph.repo != pr.repo_full_name:
+            raise ValueError("repository graph does not match the pull request")
+
+        subgraph = extract_subgraph(graph, pr.changed_files, hops=1)
+        subgraph_key = (
+            f"prs/{pr.repo_full_name}/{pr.pr_number}/{pr.commit_sha}/subgraph.json"
+        )
+        subgraph_ref = self._artifacts.put_json(
+            subgraph_key,
+            subgraph.model_dump(mode="json"),
+        )
+        envelope.context = ContextSection(
+            status=AgentStatus.OK,
+            graph_ref=graph_ref,
+            graph_version=graph.graph_version,
+            relevant_subgraph_ref=subgraph_ref,
+            conventions=graph.conventions,
+            ran_diff_only=not subgraph.nodes,
+        )
         logger.info(
-            f"Building context for PR: {pr.repo_full_name}#{pr.pr_number} (commit {pr.commit_sha[:8]})"
-        )
-        logger.info(f"Changed files: {pr.changed_files}")
-
-        # Step 2: Build or load graph (simulated - in production would use S3)
-        # For MVP, we build from fixtures and extract subgraph
-        try:
-            graph = _build_or_load_graph(pr)
-        except Exception as graph_error:
-            logger.warning(
-                f"Failed to build graph: {type(graph_error).__name__}: {graph_error}"
-            )
-            # Fall back to empty graph mode (diff-only)
-            graph = None
-
-        # Step 3: Extract subgraph for changed files
-        if graph is not None and pr.changed_files:
-            try:
-                subgraph = extract_subgraph(graph, pr.changed_files, hops=1)
-                logger.info(
-                    f"Extracted subgraph: {len(subgraph.nodes)} nodes, {len(subgraph.edges)} edges"
-                )
-            except Exception as subgraph_error:
-                logger.warning(
-                    f"Failed to extract subgraph: {type(subgraph_error).__name__}: {subgraph_error}"
-                )
-                subgraph = None
-        else:
-            subgraph = None
-
-        # Step 4: Detect conventions from code (heuristic)
-        conventions = _detect_conventions(graph, subgraph)
-
-        # Step 5: Populate context section
-        envelope.context.status = "ok"
-        envelope.context.graph_version = pr.commit_sha
-        envelope.context.conventions = conventions
-
-        # In production, graph_ref and relevant_subgraph_ref would be S3 URLs
-        if graph is not None:
-            envelope.context.graph_ref = f"s3://arcus-graphs/{pr.repo_full_name}/main.json"
-
-        if subgraph is not None:
-            envelope.context.relevant_subgraph_ref = (
-                f"s3://arcus-graphs/{pr.repo_full_name}/pr-{pr.pr_number}/subgraph.json"
-            )
-
-        envelope.context.error = None
-        mark_section_ok(envelope, "context")
-
-        logger.info("Context Builder: Successfully enriched envelope")
-        return envelope
-
-    except Exception as error:
-        logger.error(
-            f"Context Builder failed: {type(error).__name__}: {error}",
-            exc_info=True,
-        )
-        mark_section_failed(
-            envelope,
-            "context",
-            "CONTEXT_BUILDER_ERROR",
-            str(error),
+            "context_built",
+            extra={
+                "correlation_id": str(envelope.pipeline_run_id),
+                "agent": self.section_name,
+                "pr_id": f"{pr.repo_full_name}#{pr.pr_number}",
+                "node_count": len(subgraph.nodes),
+                "link_count": len(subgraph.links),
+            },
         )
         return envelope
 
 
-def _build_or_load_graph(pr: Any) -> Any:
-    """
-    Build or load graph for the repository.
+@lru_cache(maxsize=1)
+def _agent() -> ContextBuilderAgent:
+    """Reuse the stage and AWS clients across warm invocations."""
 
-    In production, this would:
-    1. Check S3 for existing graph of main branch
-    2. If not found, clone repo and build graph
-    3. Cache in S3
-
-    For MVP/testing, returns a mock graph.
-
-    Args:
-        pr: PR details with repo information.
-
-    Returns:
-        RepoGraph instance or None if unavailable.
-    """
-    # MVP: Return None (graph would be built by Frente D in setup)
-    # In production:
-    # - Try to load from S3: s3://arcus-graphs/{repo_full_name}/main.json
-    # - If not found, build from repository and cache
-    # - Return cached RepoGraph
-
-    # For now, simulate having a graph available but empty
-    from arcus.contracts import RepoGraph
-
-    logger.debug("Mock: Loading graph for PR context (MVP returns empty graph)")
-    return RepoGraph(nodes=[], edges=[])
+    return ContextBuilderAgent(artifacts(), settings())
 
 
-def _detect_conventions(graph: Any, subgraph: Any) -> ContextConventions:
-    """
-    Detect code conventions from the graph.
+def lambda_handler(event: dict[str, object], _context: object) -> dict[str, object]:
+    """Run Context Builder for one validated pipeline envelope."""
 
-    Heuristics:
-    - Naming: Look at function/class names (snake_case, camelCase, etc.)
-    - Error handling: Look for common patterns (try/except, custom exceptions)
-    - Module structure: Check for `__init__.py`, package patterns
-
-    Args:
-        graph: Full RepoGraph or None.
-        subgraph: Subgraph for changed files or None.
-
-    Returns:
-        ContextConventions with detected conventions.
-    """
-    # MVP: Return default conventions
-    # In production, analyze the graph and detect patterns
-
-    conventions = ContextConventions(
-        naming="snake_case",  # Default for Python
-        error_handling="custom exceptions",  # Common Python pattern
-        notes=[],
-    )
-
-    # Detect from subgraph if available
-    if subgraph is not None:
-        try:
-            # Heuristic: Check node names for naming convention
-            names = [node.name for node in subgraph.nodes if node.type in ("function", "class")]
-
-            if names:
-                # Simple heuristic: if most have underscores, snake_case
-                snake_case_count = sum(1 for n in names if "_" in n)
-                if snake_case_count / len(names) > 0.5:
-                    conventions.naming = "snake_case"
-                else:
-                    conventions.naming = "mixed"
-
-                conventions.notes.append(f"Analyzed {len(names)} definitions")
-        except Exception as error:
-            logger.debug(f"Convention detection heuristic failed: {error}")
-
-    return conventions
+    return _agent().run(event)

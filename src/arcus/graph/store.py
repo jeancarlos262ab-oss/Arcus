@@ -1,198 +1,48 @@
-"""Graph storage: JSON serialization for RepoGraph persistence and S3 integration."""
-import json
-from pathlib import Path
-from typing import Any
+"""Serialization helpers for the canonical repository graph contract."""
 
-from arcus.contracts import Edge, Node, RepoGraph
+from __future__ import annotations
+
+from collections.abc import Mapping
+from pathlib import Path
+
+from arcus.contracts import RepoGraph
 
 
 class GraphStore:
-    """Store and retrieve RepoGraph from JSON format (S3-compatible)."""
+    """Serialize and validate repository graphs at persistence boundaries."""
 
     @staticmethod
     def to_json(graph: RepoGraph) -> str:
-        """
-        Serialize a RepoGraph to JSON string.
+        """Serialize a graph as compact UTF-8 JSON."""
 
-        Args:
-            graph: RepoGraph instance to serialize.
-
-        Returns:
-            JSON string representation of the graph.
-        """
-        data = {
-            "nodes": [
-                {
-                    "id": node.id,
-                    "type": node.type,
-                    "file": node.file,
-                    "name": node.name,
-                    "metadata": node.metadata,
-                }
-                for node in graph.nodes
-            ],
-            "edges": [
-                {
-                    "source": edge.source,
-                    "target": edge.target,
-                    "type": edge.type,
-                }
-                for edge in graph.edges
-            ],
-        }
-        return json.dumps(data, indent=2)
+        return graph.model_dump_json()
 
     @staticmethod
-    def from_json(json_str: str) -> RepoGraph:
-        """
-        Deserialize a RepoGraph from JSON string.
+    def from_json(json_text: str) -> RepoGraph:
+        """Validate a graph loaded from untrusted JSON text."""
 
-        Args:
-            json_str: JSON string to deserialize.
-
-        Returns:
-            RepoGraph instance.
-
-        Raises:
-            json.JSONDecodeError: If JSON is invalid.
-            ValueError: If graph structure is invalid.
-        """
-        data = json.loads(json_str)
-
-        if not isinstance(data, dict):
-            raise ValueError("JSON must be a dictionary")
-
-        if "nodes" not in data or "edges" not in data:
-            raise ValueError("JSON must contain 'nodes' and 'edges' keys")
-
-        nodes = [
-            Node(
-                id=node_data["id"],
-                type=node_data["type"],
-                file=node_data["file"],
-                name=node_data["name"],
-                metadata=node_data.get("metadata", {}),
-            )
-            for node_data in data["nodes"]
-        ]
-
-        edges = [
-            Edge(
-                source=edge_data["source"],
-                target=edge_data["target"],
-                type=edge_data["type"],
-            )
-            for edge_data in data["edges"]
-        ]
-
-        return RepoGraph(nodes=nodes, edges=edges)
+        return RepoGraph.model_validate_json(json_text)
 
     @staticmethod
     def to_file(graph: RepoGraph, file_path: Path) -> None:
-        """
-        Write a RepoGraph to a JSON file.
+        """Write a validated graph to a UTF-8 file."""
 
-        Args:
-            graph: RepoGraph instance to write.
-            file_path: Path where to write the JSON file.
-
-        Raises:
-            IOError: If file cannot be written.
-        """
-        json_str = GraphStore.to_json(graph)
-        with open(file_path, "w") as f:
-            f.write(json_str)
+        file_path.write_text(GraphStore.to_json(graph), encoding="utf-8")
 
     @staticmethod
     def from_file(file_path: Path) -> RepoGraph:
-        """
-        Read a RepoGraph from a JSON file.
+        """Read and validate a graph from a UTF-8 file."""
 
-        Args:
-            file_path: Path to the JSON file to read.
-
-        Returns:
-            RepoGraph instance.
-
-        Raises:
-            IOError: If file cannot be read.
-            json.JSONDecodeError: If JSON is invalid.
-            ValueError: If graph structure is invalid.
-        """
-        with open(file_path) as f:
-            json_str = f.read()
-        return GraphStore.from_json(json_str)
+        return GraphStore.from_json(file_path.read_text(encoding="utf-8"))
 
     @staticmethod
-    def to_dict(graph: RepoGraph) -> dict[str, Any]:
-        """
-        Convert a RepoGraph to a dictionary (for S3 metadata compatibility).
+    def to_dict(graph: RepoGraph) -> dict[str, object]:
+        """Return a JSON-compatible object suitable for S3ArtifactStore."""
 
-        Args:
-            graph: RepoGraph instance to convert.
-
-        Returns:
-            Dictionary representation of the graph.
-        """
-        return {
-            "nodes": [
-                {
-                    "id": node.id,
-                    "type": node.type,
-                    "file": node.file,
-                    "name": node.name,
-                    "metadata": node.metadata,
-                }
-                for node in graph.nodes
-            ],
-            "edges": [
-                {
-                    "source": edge.source,
-                    "target": edge.target,
-                    "type": edge.type,
-                }
-                for edge in graph.edges
-            ],
-        }
+        return graph.model_dump(mode="json")
 
     @staticmethod
-    def from_dict(data: dict[str, Any]) -> RepoGraph:
-        """
-        Convert a dictionary to a RepoGraph.
+    def from_dict(data: Mapping[str, object]) -> RepoGraph:
+        """Validate a graph loaded from an SDK mapping."""
 
-        Args:
-            data: Dictionary containing 'nodes' and 'edges'.
-
-        Returns:
-            RepoGraph instance.
-
-        Raises:
-            ValueError: If dictionary structure is invalid.
-        """
-        if not isinstance(data, dict):
-            raise ValueError("Data must be a dictionary")
-
-        if "nodes" not in data or "edges" not in data:
-            raise ValueError("Data must contain 'nodes' and 'edges' keys")
-
-        nodes = [
-            Node(
-                id=node_data["id"],
-                type=node_data["type"],
-                file=node_data["file"],
-                name=node_data["name"],
-                metadata=node_data.get("metadata", {}),
-            )
-            for node_data in data["nodes"]
-        ]
-
-        edges = [
-            Edge(
-                source=edge_data["source"],
-                target=edge_data["target"],
-                type=edge_data["type"],
-            )
-            for edge_data in data["edges"]
-        ]
-
-        return RepoGraph(nodes=nodes, edges=edges)
+        return RepoGraph.model_validate(data)

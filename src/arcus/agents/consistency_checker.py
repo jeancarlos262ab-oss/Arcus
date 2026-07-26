@@ -1,229 +1,118 @@
-"""Consistency Checker Agent - Analyzes code for consistency with project conventions."""
+"""Consistency Checker stage using Bedrock Converse and persisted PR artifacts."""
+
+from __future__ import annotations
+
 import json
-import logging
-from typing import Any
+from functools import lru_cache
 
-from arcus.agents.base import agent_handler, mark_section_failed, mark_section_ok
-from arcus.bedrock.client import invoke_claude
-from arcus.contracts import Finding, Fix, PipelineEnvelope
-
-logger = logging.getLogger(__name__)
-
-
-def _generate_consistency_prompt(
-    diff_content: str,
-    conventions: dict[str, Any],
-    repo_name: str,
-    pr_number: int,
-) -> str:
-    """
-    Generate a prompt for Claude to analyze code consistency.
-
-    Args:
-        diff_content: Unified diff from the PR.
-        conventions: Detected conventions (naming, error handling, etc.).
-        repo_name: Repository name for context.
-        pr_number: PR number for context.
-
-    Returns:
-        Formatted prompt for Claude.
-    """
-    conventions_text = json.dumps(conventions, indent=2)
-
-    return f"""Analyze the following code diff for consistency with project conventions.
-
-**Project**: {repo_name} (PR #{pr_number})
-
-**Detected Conventions**:
-{conventions_text}
-
-**Code Diff**:
-```patch
-{diff_content}
-```
-
-**Analysis Task**:
-1. Check if added/modified code follows naming conventions
-2. Verify error handling consistency
-3. Look for code style violations
-4. Identify inconsistencies with documented patterns
-
-**Response Format**:
-Respond with a JSON array of findings. Each finding must have:
-- "file": file path
-- "line_start": starting line number
-- "line_end": ending line number
-- "title": short description
-- "rationale": explanation of the violation
-- "severity": "high", "medium", or "low"
-- "type": "consistency" or "convention_violation"
-- "suggested_fix": optional suggestion
-
-Example:
-[
-  {{
-    "file": "src/main.py",
-    "line_start": 42,
-    "line_end": 44,
-    "title": "Inconsistent naming pattern",
-    "rationale": "Function uses camelCase but convention is snake_case",
-    "severity": "medium",
-    "type": "convention_violation",
-    "suggested_fix": "rename_function() instead of renameFunction()"
-  }}
-]
-
-If no violations found, return empty array [].
-"""
+from arcus.agents.base import BaseAgent, build_analysis_prompt, load_relevant_graph
+from arcus.agents.runtime import artifacts, model, settings
+from arcus.bedrock.client import BedrockClient
+from arcus.config import Settings
+from arcus.contracts import (
+    AgentFindingsSection,
+    AgentStatus,
+    FindingAgent,
+    FindingType,
+    PipelineEnvelope,
+)
+from arcus.errors import AgentError, BedrockResponseError
+from arcus.storage.artifacts import S3ArtifactStore
 
 
-def _parse_claude_findings(
-    claude_response: str,
-    agent_name: str = "consistency_checker",
-) -> list[Finding]:
-    """
-    Parse Claude's JSON response into Finding objects.
+class ConsistencyCheckerAgent(BaseAgent):
+    """Find convention and consistency violations using diff and graph context."""
 
-    Args:
-        claude_response: Claude's response text.
-        agent_name: Name of the agent for finding attribution.
+    section_name = "consistency"
+    failure_code = "consistency_analysis_failed"
 
-    Returns:
-        List of Finding objects.
-    """
-    findings: list[Finding] = []
+    def __init__(
+        self,
+        *,
+        model: BedrockClient,
+        artifact_store: S3ArtifactStore,
+        runtime_settings: Settings,
+    ) -> None:
+        """Create the stage with deterministic model and artifact boundaries."""
 
-    try:
-        # Extract JSON from response (Claude may add explanatory text)
-        response_text = claude_response.strip()
+        super().__init__(runtime_settings)
+        self._model = model
+        self._artifacts = artifact_store
 
-        # Try to find JSON array in response
-        json_start = response_text.find("[")
-        json_end = response_text.rfind("]") + 1
+    def process(self, envelope: PipelineEnvelope) -> PipelineEnvelope:
+        """Read bounded artifacts, invoke Converse once, and validate findings."""
 
-        if json_start == -1 or json_end == 0:
-            logger.warning("No JSON array found in Claude response")
-            return findings
-
-        json_str = response_text[json_start:json_end]
-        items = json.loads(json_str)
-
-        if not isinstance(items, list):
-            logger.warning("Claude response is not a JSON array")
-            return findings
-
-        for idx, item in enumerate(items):
-            try:
-                # Map Claude response to Finding model
-                fix_data = None
-                if item.get("suggested_fix"):
-                    fix_data = Fix(
-                        description=item.get("suggested_fix", ""),
-                        suggested_diff="",
-                        confidence="medium",
-                    )
-
-                finding = Finding(
-                    id=f"{agent_name}-consistency-{idx}",
-                    agent=agent_name,
-                    type=item.get("type", "convention_violation"),
-                    severity=item.get("severity", "medium"),
-                    file=item.get("file", "unknown"),
-                    line_start=int(item.get("line_start", 0)),
-                    line_end=int(item.get("line_end", 0)),
-                    title=item.get("title", "Consistency violation"),
-                    rationale=item.get("rationale", ""),
-                    evidence_refs=[],
-                    fix=fix_data,
+        if envelope.pr.diff_ref is None:
+            raise AgentError("pull request diff is unavailable", code="missing_diff")
+        diff = self._artifacts.get_text(envelope.pr.diff_ref)
+        graph = load_relevant_graph(envelope, self._artifacts.get_text)
+        conventions = (
+            envelope.context.conventions.model_dump(mode="json")
+            if envelope.context.conventions is not None
+            else {}
+        )
+        prompt = build_analysis_prompt(
+            _build_instructions(envelope, conventions),
+            diff,
+            graph,
+            max_bytes=self._settings.max_prompt_bytes,
+        )
+        findings = self._model.parse_findings(
+            self._model.invoke_model(
+                prompt,
+                max_tokens=self._settings.max_output_tokens,
+            )
+        )
+        for finding in findings:
+            if finding.agent is not FindingAgent.CONSISTENCY_CHECKER:
+                raise BedrockResponseError("Consistency response used the wrong agent")
+            if finding.type not in {
+                FindingType.INCONSISTENCY,
+                FindingType.CONVENTION_VIOLATION,
+            }:
+                raise BedrockResponseError(
+                    "Consistency response used an invalid finding type"
                 )
-                findings.append(finding)
-
-            except (ValueError, TypeError, KeyError) as e:
-                logger.warning(f"Failed to parse finding item {idx}: {e}")
-                continue
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse Claude JSON response: {e}")
-        return findings
-
-    return findings
-
-
-@agent_handler
-def handle_consistency_checker(envelope: PipelineEnvelope) -> PipelineEnvelope:
-    """
-    Check code consistency with project conventions.
-
-    Handler for Consistency Checker Agent (B5).
-    - Reads diff and context conventions
-    - Invokes Claude for consistency analysis
-    - Populates envelope.consistency with findings
-
-    Args:
-        envelope: PipelineEnvelope with PR context.
-
-    Returns:
-        Updated envelope with consistency findings.
-    """
-    try:
-        logger.info(
-            f"Consistency Checker analyzing {envelope.pr.repo_full_name}#{envelope.pr.pr_number}"
-        )
-
-        # Step 1: Extract context information
-        conventions = envelope.context.conventions
-        if not conventions:
-            logger.warning("No conventions found in context")
-            conventions_dict = {}
-        else:
-            conventions_dict = {
-                "naming": conventions.naming,
-                "error_handling": conventions.error_handling,
-                "notes": conventions.notes,
-            }
-
-        # Step 2: Read diff content
-        # In MVP, we'll use a simple placeholder or mock diff
-        # In production, fetch from envelope.pr.diff_ref (S3)
-        diff_content = f"# Diff for {envelope.pr.repo_full_name} PR #{envelope.pr.pr_number}"
-
-        # Step 3: Generate prompt for Claude
-        prompt = _generate_consistency_prompt(
-            diff_content=diff_content,
-            conventions=conventions_dict,
-            repo_name=envelope.pr.repo_full_name,
-            pr_number=envelope.pr.pr_number,
-        )
-
-        # Step 4: Invoke Claude
-        logger.debug(
-            f"Invoking Claude for consistency analysis (repo={envelope.pr.repo_full_name})"
-        )
-        claude_response = invoke_claude(
-            prompt=prompt,
-            system_prompt="You are a strict code consistency analyzer. Analyze code for violations of project conventions. Respond only with valid JSON.",
-            max_tokens=2048,
-        )
-
-        # Step 5: Parse findings
-        findings = _parse_claude_findings(claude_response)
-        logger.info(f"Found {len(findings)} consistency violations")
-
-        # Step 6: Update envelope
-        envelope.consistency.status = "ok"
-        envelope.consistency.findings = findings
-        envelope.consistency.error = None
-
-        mark_section_ok(envelope, "consistency")
-
-        return envelope
-
-    except Exception as e:
-        logger.error(f"Consistency Checker failed: {type(e).__name__}: {e}", exc_info=True)
-        mark_section_failed(
-            envelope,
-            "consistency",
-            error_code="consistency_analysis_failed",
-            error_message=f"Failed to analyze consistency: {str(e)}",
+        envelope.consistency = AgentFindingsSection(
+            status=AgentStatus.OK,
+            findings=findings,
         )
         return envelope
+
+
+def _build_instructions(
+    envelope: PipelineEnvelope,
+    conventions: dict[str, object],
+) -> str:
+    """Build deterministic instructions requesting the exact Finding contract."""
+
+    return (
+        "You are Arcus Consistency Checker. Review the supplied unified diff "
+        "against repository conventions and use the repository graph as evidence "
+        "for established patterns and related code. Return JSON as "
+        '{"findings": [...]} where every item has id (UUID), '
+        'agent="consistency_checker", type (inconsistency or '
+        "convention_violation), severity, file, line_start, line_end, title, "
+        "rationale, evidence_refs, and fix=null. Return an empty findings array "
+        "when there are no actionable violations.\n\n"
+        f"Repository: {envelope.pr.repo_full_name}\n"
+        f"PR: {envelope.pr.pr_number}\n"
+        f"Conventions: {json.dumps(conventions, separators=(',', ':'))}"
+    )
+
+
+@lru_cache(maxsize=1)
+def _agent() -> ConsistencyCheckerAgent:
+    """Reuse the stage and clients across warm invocations."""
+
+    return ConsistencyCheckerAgent(
+        model=model(),
+        artifact_store=artifacts(),
+        runtime_settings=settings(),
+    )
+
+
+def lambda_handler(event: dict[str, object], _context: object) -> dict[str, object]:
+    """Run Consistency Checker for one validated pipeline envelope."""
+
+    return _agent().run(event)

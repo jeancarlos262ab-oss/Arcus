@@ -1,97 +1,110 @@
-"""Pipeline envelope and related data structures for inter-agent communication."""
-from datetime import datetime
-from typing import Literal
+"""Authoritative contract passed between every pipeline stage."""
 
-from pydantic import BaseModel, Field
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from arcus.contracts.findings import Finding
 
-StatusValue = Literal["ok", "failed", "skipped"]
+
+class AgentStatus(StrEnum):
+    """Lifecycle state shared by every pipeline section."""
+
+    PENDING = "pending"
+    OK = "ok"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
-class ErrorDetail(BaseModel):
-    """Error information for failed stages."""
+class AgentError(BaseModel):
+    """Structured error retained when a stage degrades gracefully."""
 
-    code: str
-    message: str
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=1)
+    message: str = Field(min_length=1)
 
 
-class PRDetails(BaseModel):
-    """GitHub pull request details."""
+class PullRequestMetadata(BaseModel):
+    """Bounded pull-request metadata carried between Lambda functions."""
 
-    repo_full_name: str
-    pr_number: int
-    commit_sha: str
-    installation_id: int
+    model_config = ConfigDict(extra="forbid")
+
+    repo_full_name: str = Field(min_length=3, pattern=r"^[^/]+/[^/]+$")
+    pr_number: int = Field(gt=0)
+    commit_sha: str = Field(min_length=7)
+    installation_id: int = Field(gt=0)
     changed_files: list[str] = Field(default_factory=list)
-    diff_ref: str
+    diff_ref: str | None = None
 
 
 class ContextConventions(BaseModel):
-    """Code conventions detected or configured for the repository."""
+    """Repository conventions supplied as bounded model context."""
+
+    model_config = ConfigDict(extra="forbid")
 
     naming: str = "snake_case"
-    error_handling: str = "custom exceptions"
+    error_handling: str = "custom_exceptions"
+    test_framework: str = "pytest"
     notes: list[str] = Field(default_factory=list)
 
 
-class ContextSection(BaseModel):
-    """Context section: code graph and conventions for the PR."""
+class StageSection(BaseModel):
+    """Common lifecycle and error invariants for a pipeline stage."""
 
-    status: StatusValue
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    status: AgentStatus = AgentStatus.PENDING
+    error: AgentError | None = None
+
+    @model_validator(mode="after")
+    def validate_error_state(self) -> StageSection:
+        """Keep status and error data consistent at every boundary."""
+
+        if self.status is AgentStatus.FAILED and self.error is None:
+            raise ValueError("failed stages must include an error")
+        if self.status is not AgentStatus.FAILED and self.error is not None:
+            raise ValueError("only failed stages may include an error")
+        return self
+
+
+class ContextSection(StageSection):
+    """Persisted repository graph and conventions used during analysis."""
+
     graph_ref: str | None = None
     graph_version: str | None = None
     relevant_subgraph_ref: str | None = None
-    conventions: ContextConventions = Field(default_factory=ContextConventions)
-    error: ErrorDetail | None = None
+    conventions: ContextConventions | None = None
+    ran_diff_only: bool = False
 
 
-class ConsistencySection(BaseModel):
-    """Consistency checking results: convention violations, etc."""
+class AgentFindingsSection(StageSection):
+    """Findings emitted or enriched by one analysis stage."""
 
-    status: StatusValue
     findings: list[Finding] = Field(default_factory=list)
-    error: ErrorDetail | None = None
 
 
-class BugsSection(BaseModel):
-    """Bug hunting results: logic bugs, security issues, etc."""
+class ReportSection(StageSection):
+    """Final GitHub comment and compact review summary."""
 
-    status: StatusValue
-    findings: list[Finding] = Field(default_factory=list)
-    error: ErrorDetail | None = None
-
-
-class FixesSection(BaseModel):
-    """Fix suggestion results: remedies for findings."""
-
-    status: StatusValue
-    findings: list[Finding] = Field(default_factory=list)
-    error: ErrorDetail | None = None
-
-
-class ReportSection(BaseModel):
-    """Report section: final comment and summary."""
-
-    status: StatusValue
     comment_url: str | None = None
     summary: str | None = None
-    error: ErrorDetail | None = None
 
 
 class PipelineEnvelope(BaseModel):
-    """
-    The unified data structure passed through the entire pipeline.
+    """The complete, validated object passed through Step Functions."""
 
-    Each agent reads what it needs and appends its results to its section.
-    No agent overwrites another's work.
-    """
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    pipeline_run_id: str
+    pipeline_run_id: UUID
     created_at: datetime
-    pr: PRDetails
-    context: ContextSection
-    consistency: ConsistencySection
-    bugs: BugsSection
-    fixes: FixesSection
-    report: ReportSection
+    pr: PullRequestMetadata
+    context: ContextSection = Field(default_factory=ContextSection)
+    consistency: AgentFindingsSection = Field(default_factory=AgentFindingsSection)
+    bugs: AgentFindingsSection = Field(default_factory=AgentFindingsSection)
+    fixes: AgentFindingsSection = Field(default_factory=AgentFindingsSection)
+    report: ReportSection = Field(default_factory=ReportSection)

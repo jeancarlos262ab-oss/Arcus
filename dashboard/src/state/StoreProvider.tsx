@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import { generateDataset, REPOS } from "@/lib/mockData";
+import { RUNTIME_CONFIG } from "@/lib/runtimeConfig";
 import { simulateReview, type LogLine, type NewReviewInput } from "@/lib/simulate";
 import type { Finding, ReviewRun, Severity } from "@/lib/types";
 
@@ -26,8 +27,8 @@ export interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   autoComment: true,
   minSeverityToComment: "low",
-  region: "us-east-1",
-  modelId: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+  region: RUNTIME_CONFIG.region,
+  modelId: RUNTIME_CONFIG.modelId,
   githubAppId: "",
   webhookConfigured: false,
 };
@@ -41,13 +42,25 @@ interface PersistShape {
 
 const STORAGE_KEY = "arcus.store.v1";
 
+function normalizeSettings(settings: Partial<Settings> | undefined): Settings {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...settings,
+    // Runtime and integration status are backend-owned, never browser-owned.
+    region: RUNTIME_CONFIG.region,
+    modelId: RUNTIME_CONFIG.modelId,
+    githubAppId: DEFAULT_SETTINGS.githubAppId,
+    webhookConfigured: DEFAULT_SETTINGS.webhookConfigured,
+  };
+}
+
 function loadInitial(): PersistShape {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as PersistShape;
       if (parsed.runs && parsed.repos) {
-        return { ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } };
+        return { ...parsed, settings: normalizeSettings(parsed.settings) };
       }
     }
   } catch {

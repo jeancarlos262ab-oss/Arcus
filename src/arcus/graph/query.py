@@ -1,217 +1,118 @@
-"""Graph querying: Subgraph extraction for PR context analysis."""
+"""Queries over the canonical repository node-link graph."""
 
-from arcus.contracts import Edge, Node, RepoGraph
+from __future__ import annotations
+
+from arcus.contracts import GraphLink, GraphNode, RepoGraph
 
 
 def extract_subgraph(
-    graph: RepoGraph, changed_files: list[str], hops: int = 1
+    graph: RepoGraph,
+    changed_files: list[str],
+    hops: int = 1,
 ) -> RepoGraph:
-    """
-    Extract a subgraph containing changed files and their dependencies.
-
-    This function filters the global repo graph to include only:
-    - Nodes corresponding to changed files
-    - Nodes that are `hops` edges away (default 1 hop for immediate dependencies)
-
-    Used by Context Builder to create a focused context for PR analysis.
+    """Extract changed-file nodes plus dependencies and dependents.
 
     Args:
-        graph: The full RepoGraph to query.
-        changed_files: List of file paths that changed in the PR.
-        hops: Number of edges to traverse from changed files (default 1).
+        graph: Complete repository graph loaded from S3.
+        changed_files: Repository-relative paths changed by the pull request.
+        hops: Number of relationship expansions to include.
 
     Returns:
-        A new RepoGraph containing relevant nodes and edges.
-
-    Example:
-        >>> full_graph = RepoGraph(...)
-        >>> subgraph = extract_subgraph(full_graph, ["src/main.py", "src/utils.py"])
-        >>> # Returns graph with main.py, utils.py, and all functions/classes they contain
+        A graph preserving source metadata with only relevant nodes and links.
     """
-    # Normalize file paths for comparison
-    changed_files_set = {str(f) for f in changed_files}
 
-    # Step 1: Find all nodes related to changed files
-    relevant_node_ids: set[str] = set()
+    if hops < 0:
+        raise ValueError("hops cannot be negative")
+    changed = {path.replace("\\", "/") for path in changed_files}
+    relevant = {
+        node.id for node in graph.nodes if node.file.replace("\\", "/") in changed
+    }
 
-    # Add nodes from changed files (file nodes and their children)
-    for node in graph.nodes:
-        if node.type == "file" and node.file in changed_files_set:
-            # Add the file node itself
-            relevant_node_ids.add(node.id)
+    for _ in range(hops):
+        expanded = set(relevant)
+        for link in graph.links:
+            if link.source in relevant:
+                expanded.add(link.target)
+            if link.target in relevant:
+                expanded.add(link.source)
+        relevant = expanded
 
-    # Add all nodes contained within changed files
-    for edge in graph.edges:
-        if edge.type == "contains" and edge.source in relevant_node_ids:
-            # File contains function/class
-            relevant_node_ids.add(edge.target)
-
-    # Step 2: Expand to dependencies (hops away)
-    for hop in range(hops):
-        new_nodes: set[str] = set()
-
-        # Find all nodes that current relevant nodes depend on
-        for edge in graph.edges:
-            if edge.source in relevant_node_ids and edge.type != "contains":
-                # This is a dependency edge (imports, calls, etc.)
-                new_nodes.add(edge.target)
-
-            # Also include reverse: nodes that depend on our changed files
-            if edge.target in relevant_node_ids and edge.type != "contains":
-                new_nodes.add(edge.source)
-
-        relevant_node_ids.update(new_nodes)
-
-    # Step 3: Build the subgraph with filtered nodes and edges
-    subgraph_nodes = [node for node in graph.nodes if node.id in relevant_node_ids]
-
-    subgraph_edges = [
-        edge
-        for edge in graph.edges
-        if edge.source in relevant_node_ids and edge.target in relevant_node_ids
+    nodes = [node for node in graph.nodes if node.id in relevant]
+    links = [
+        link
+        for link in graph.links
+        if link.source in relevant and link.target in relevant
     ]
-
-    return RepoGraph(nodes=subgraph_nodes, edges=subgraph_edges)
-
-
-def find_nodes_by_file(graph: RepoGraph, file_path: str) -> list[Node]:
-    """
-    Find all nodes associated with a specific file.
-
-    Args:
-        graph: RepoGraph to search.
-        file_path: File path to find nodes for.
-
-    Returns:
-        List of nodes in the file (functions, classes, methods, etc.)
-    """
-    return [node for node in graph.nodes if node.file == file_path]
+    return graph.model_copy(update={"nodes": nodes, "links": links})
 
 
-def find_node_by_id(graph: RepoGraph, node_id: str) -> Node | None:
-    """
-    Find a node by its ID.
+def find_nodes_by_file(graph: RepoGraph, file_path: str) -> list[GraphNode]:
+    """Return all graph nodes declared in one repository-relative path."""
 
-    Args:
-        graph: RepoGraph to search.
-        node_id: ID of the node to find.
-
-    Returns:
-        The node if found, None otherwise.
-    """
-    for node in graph.nodes:
-        if node.id == node_id:
-            return node
-    return None
+    normalized = file_path.replace("\\", "/")
+    return [node for node in graph.nodes if node.file.replace("\\", "/") == normalized]
 
 
-def find_edges_from_node(graph: RepoGraph, node_id: str) -> list[Edge]:
-    """
-    Find all edges originating from a specific node.
+def find_node_by_id(graph: RepoGraph, node_id: str) -> GraphNode | None:
+    """Return a graph node by ID, or ``None`` when absent."""
 
-    Args:
-        graph: RepoGraph to search.
-        node_id: Source node ID.
-
-    Returns:
-        List of edges where this node is the source.
-    """
-    return [edge for edge in graph.edges if edge.source == node_id]
+    return next((node for node in graph.nodes if node.id == node_id), None)
 
 
-def find_edges_to_node(graph: RepoGraph, node_id: str) -> list[Edge]:
-    """
-    Find all edges pointing to a specific node.
+def find_links_from_node(graph: RepoGraph, node_id: str) -> list[GraphLink]:
+    """Return outgoing links from one node."""
 
-    Args:
-        graph: RepoGraph to search.
-        node_id: Target node ID.
+    return [link for link in graph.links if link.source == node_id]
 
-    Returns:
-        List of edges where this node is the target.
-    """
-    return [edge for edge in graph.edges if edge.target == node_id]
+
+def find_links_to_node(graph: RepoGraph, node_id: str) -> list[GraphLink]:
+    """Return incoming links to one node."""
+
+    return [link for link in graph.links if link.target == node_id]
 
 
 def get_node_dependencies(
-    graph: RepoGraph, node_id: str, hops: int = 1
-) -> list[Node]:
-    """
-    Get all nodes that a given node depends on (transitively).
+    graph: RepoGraph,
+    node_id: str,
+    hops: int = 1,
+) -> list[GraphNode]:
+    """Return nodes reachable through outgoing links within ``hops``."""
 
-    Args:
-        graph: RepoGraph to search.
-        node_id: Source node to find dependencies for.
-        hops: Number of hops to traverse (default 1).
-
-    Returns:
-        List of dependency nodes.
-    """
-    visited: set[str] = set()
-    to_visit = [node_id]
-    dependencies: set[str] = set()
-
-    for _ in range(hops):
-        next_visit = []
-        for current_id in to_visit:
-            if current_id in visited:
-                continue
-            visited.add(current_id)
-
-            # Find edges from this node (excluding "contains" edges)
-            for edge in graph.edges:
-                if (
-                    edge.source == current_id
-                    and edge.type != "contains"
-                    and edge.target not in visited
-                ):
-                    dependencies.add(edge.target)
-                    next_visit.append(edge.target)
-
-        to_visit = next_visit
-
-    return [
-        node for node in graph.nodes if node.id in dependencies
-    ]
+    return _traverse(graph, node_id, hops=hops, reverse=False)
 
 
 def get_node_dependents(
-    graph: RepoGraph, node_id: str, hops: int = 1
-) -> list[Node]:
-    """
-    Get all nodes that depend on a given node (reverse dependencies).
+    graph: RepoGraph,
+    node_id: str,
+    hops: int = 1,
+) -> list[GraphNode]:
+    """Return nodes reaching the target through incoming links."""
 
-    Args:
-        graph: RepoGraph to search.
-        node_id: Target node to find dependents for.
-        hops: Number of hops to traverse (default 1).
+    return _traverse(graph, node_id, hops=hops, reverse=True)
 
-    Returns:
-        List of dependent nodes.
-    """
-    visited: set[str] = set()
-    to_visit = [node_id]
-    dependents: set[str] = set()
 
+def _traverse(
+    graph: RepoGraph,
+    node_id: str,
+    *,
+    hops: int,
+    reverse: bool,
+) -> list[GraphNode]:
+    """Traverse links in one direction without returning the origin."""
+
+    if hops < 0:
+        raise ValueError("hops cannot be negative")
+    visited = {node_id}
+    frontier = {node_id}
+    found: set[str] = set()
     for _ in range(hops):
-        next_visit = []
-        for current_id in to_visit:
-            if current_id in visited:
-                continue
-            visited.add(current_id)
-
-            # Find edges to this node (excluding "contains" edges)
-            for edge in graph.edges:
-                if (
-                    edge.target == current_id
-                    and edge.type != "contains"
-                    and edge.source not in visited
-                ):
-                    dependents.add(edge.source)
-                    next_visit.append(edge.source)
-
-        to_visit = next_visit
-
-    return [
-        node for node in graph.nodes if node.id in dependents
-    ]
+        next_frontier: set[str] = set()
+        for link in graph.links:
+            source = link.target if reverse else link.source
+            target = link.source if reverse else link.target
+            if source in frontier and target not in visited:
+                next_frontier.add(target)
+                found.add(target)
+        visited.update(next_frontier)
+        frontier = next_frontier
+    return [node for node in graph.nodes if node.id in found]

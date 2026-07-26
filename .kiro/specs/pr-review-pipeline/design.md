@@ -17,6 +17,10 @@ Estas eran las decisiones abiertas; quedan resueltas así para no perder tiempo:
     Fusionar Fix Suggester en Bug Hunter solo si el día 6 la integración va tarde.
 11. **Seguridad del endpoint:** público + firma HMAC obligatoria (no IAM/VPC).
 12. **Secretos:** AWS Secrets Manager.
+13. **Modelo Bedrock:** Amazon Nova 2 Lite mediante la API Converse, con
+    `BEDROCK_MODEL_ID` configurable y `us.amazon.nova-2-lite-v1:0` como valor inicial
+    para `us-east-1`. Las respuestas siempre se validan con los contratos Pydantic y
+    Bedrock se mockea en CI.
 
 ## Visión general
 
@@ -100,15 +104,15 @@ errores de infra que sí deben reintentarse a nivel SFN).
 
 - **Context Builder** (`graph/`): usa tree-sitter para parsear Python, construye/actualiza
   el grafo networkx, lo persiste en S3, extrae el subgrafo relevante y lo referencia.
-- **Consistency Checker**: carga subgrafo + convenciones, arma prompt, llama Claude,
+- **Consistency Checker**: carga subgrafo + convenciones, arma prompt, llama Bedrock mediante el adaptador Converse,
   parsea a `Finding[]`.
 - **Bug Hunter**: igual, enfocado en lógica/seguridad con contexto.
-- **Fix Suggester**: recorre findings existentes, llama Claude para proponer `fix`.
+- **Fix Suggester**: recorre findings existentes, llama Bedrock mediante el adaptador Converse para proponer `fix`.
 - **Reporter**: renderiza Markdown, publica/actualiza comentario en GitHub, escribe fila
   en DynamoDB.
 
 ### 4. Persistencia
-- **S3** (`arcus-{env}-context-graphs`): grafos, subgrafos y diffs.
+- **S3** (`arcus-{env}-context-artifacts`): grafos, subgrafos y diffs.
 - **DynamoDB** (`arcus-{env}-review-history`): historial + dedup + métricas.
 
 ### 5. Dashboard (React + Vite + Tailwind + Recharts)
@@ -124,7 +128,7 @@ cambiar una sola implementación de `DataSource`.
 ### Layout de S3
 
 ```
-arcus-{env}-context-graphs/
+arcus-{env}-context-artifacts/
 ├── graphs/{owner}/{repo}/main.json          # grafo actual del branch base
 ├── graphs/{owner}/{repo}/history/{sha}.json # snapshots por commit (opcional)
 ├── prs/{owner}/{repo}/{pr}/diff.patch        # diff del PR

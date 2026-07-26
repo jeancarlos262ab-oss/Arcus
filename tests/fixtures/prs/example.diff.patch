@@ -1,0 +1,14 @@
+diff --git a/src/config.py b/src/config.py
+index 1111111..2222222 100644
+--- a/src/config.py
++++ b/src/config.py
+@@ -8,6 +8,12 @@ class RetryConfig:
+     max_attempts: int = 3
+     timeout_seconds: float = 5.0
+ 
++    def backoff_seconds(self, attempt: int) -> float:
++        return min(2**attempt, 30.0)
++
+ 
+ def load_config(environ: Mapping[str, str]) -> RetryConfig:
+     return RetryConfig(

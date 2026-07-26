@@ -1,0 +1,42 @@
+{
+  "pipeline_run_id": "123e4567-e89b-42d3-a456-426614174000",
+  "created_at": "2026-07-21T10:00:00Z",
+  "pr": {
+    "repo_full_name": "acme/widgets",
+    "pr_number": 42,
+    "commit_sha": "abc123def4567890",
+    "installation_id": 123456,
+    "changed_files": [],
+    "diff_ref": null
+  },
+  "context": {
+    "status": "pending",
+    "error": null,
+    "graph_ref": null,
+    "graph_version": null,
+    "relevant_subgraph_ref": null,
+    "conventions": null,
+    "ran_diff_only": false
+  },
+  "consistency": {
+    "status": "pending",
+    "error": null,
+    "findings": []
+  },
+  "bugs": {
+    "status": "pending",
+    "error": null,
+    "findings": []
+  },
+  "fixes": {
+    "status": "pending",
+    "error": null,
+    "findings": []
+  },
+  "report": {
+    "status": "pending",
+    "error": null,
+    "comment_url": null,
+    "summary": null
+  }
+}

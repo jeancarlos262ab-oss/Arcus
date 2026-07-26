@@ -1,4 +1,19 @@
-"""Bedrock integration for Claude LLM invocations."""
-from arcus.bedrock.client import get_bedrock_client, invoke_claude
+"""Bedrock Converse adapter and validated response parsers."""
 
-__all__ = ["invoke_claude", "get_bedrock_client"]
+from arcus.bedrock.client import (
+    BedrockClient,
+    extract_text,
+    parse_findings,
+    parse_findings_response,
+    parse_fix_batch,
+    parse_json_response,
+)
+
+__all__ = [
+    "BedrockClient",
+    "extract_text",
+    "parse_findings",
+    "parse_findings_response",
+    "parse_fix_batch",
+    "parse_json_response",
+]

@@ -1,0 +1,37 @@
+{
+  "action": "opened",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "title": "Add configurable retry policy",
+    "state": "open",
+    "html_url": "https://github.com/acme/widgets/pull/42",
+    "head": {
+      "ref": "feature/retry-policy",
+      "sha": "abc123def4567890"
+    },
+    "base": {
+      "ref": "main",
+      "sha": "def456abc1237890"
+    },
+    "changed_files": 2,
+    "additions": 28,
+    "deletions": 4
+  },
+  "repository": {
+    "id": 1001,
+    "name": "widgets",
+    "full_name": "acme/widgets",
+    "private": true,
+    "default_branch": "main",
+    "owner": {
+      "login": "acme"
+    }
+  },
+  "installation": {
+    "id": 123456
+  },
+  "sender": {
+    "login": "octocat"
+  }
+}
