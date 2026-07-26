@@ -1,0 +1,61 @@
+{
+  "schema_version": "1",
+  "repo": "acme/widgets",
+  "graph_version": "def456abc1237890",
+  "built_at": "2026-07-21T10:00:00Z",
+  "language": "python",
+  "directed": true,
+  "conventions": {
+    "naming": "snake_case",
+    "error_handling": "custom_exceptions",
+    "test_framework": "pytest",
+    "notes": [
+      "DTOs use Pydantic",
+      "structured logging is preferred"
+    ]
+  },
+  "nodes": [
+    {
+      "id": "src/config.py",
+      "kind": "module",
+      "file": "src/config.py",
+      "name": "config",
+      "line_start": 1,
+      "line_end": 40,
+      "signature": null,
+      "docstring_present": true
+    },
+    {
+      "id": "src/config.py::load_config",
+      "kind": "function",
+      "file": "src/config.py",
+      "name": "load_config",
+      "line_start": 14,
+      "line_end": 24,
+      "signature": "def load_config(environ: Mapping[str, str]) -> RetryConfig",
+      "docstring_present": true
+    },
+    {
+      "id": "src/review.py::run_review",
+      "kind": "function",
+      "file": "src/review.py",
+      "name": "run_review",
+      "line_start": 8,
+      "line_end": 22,
+      "signature": "def run_review(config: RetryConfig) -> ReviewResult",
+      "docstring_present": false
+    }
+  ],
+  "links": [
+    {
+      "source": "src/config.py",
+      "target": "src/config.py::load_config",
+      "type": "defines"
+    },
+    {
+      "source": "src/review.py::run_review",
+      "target": "src/config.py::load_config",
+      "type": "calls"
+    }
+  ]
+}

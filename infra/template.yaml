@@ -1,0 +1,766 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Arcus bounded multi-agent pull request review pipeline.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, demo]
+  BedrockModelId:
+    Type: String
+    Default: us.amazon.nova-2-lite-v1:0
+    MinLength: 1
+  BedrockFoundationModelId:
+    Type: String
+    Default: amazon.nova-2-lite-v1:0
+    MinLength: 1
+  GitHubAppId:
+    Type: Number
+    Default: 123456
+    MinValue: 1
+  AllowedRepositories:
+    Type: String
+    Default: "*"
+    Description: Use * for every repository in approved installations, or a comma-separated owner/repo allowlist.
+  AllowedInstallationIds:
+    Type: String
+    Default: "*"
+    Description: Use * only for a private single-account GitHub App, or comma-separated positive installation IDs.
+  ReviewsPerRepositoryDay:
+    Type: Number
+    Default: 10
+    MinValue: 1
+  ReviewsPerInstallationHour:
+    Type: Number
+    Default: 5
+    MinValue: 1
+  AdmissionTtlSeconds:
+    Type: Number
+    Default: 7776000
+    MinValue: 1
+  MaxWebhookBodyBytes:
+    Type: Number
+    Default: 1048576
+    MinValue: 1
+  SecretCacheTtlSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 1
+  MaxOutputTokens:
+    Type: Number
+    Default: 1200
+    MinValue: 1
+  MaxPromptBytes:
+    Type: Number
+    Default: 60000
+    MinValue: 1
+  MaxFindingsPerStage:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 10
+  MaxFindingsTotal:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 10
+  MaxChangedFiles:
+    Type: Number
+    Default: 50
+    MinValue: 1
+    MaxValue: 50
+  MaxDiffBytes:
+    Type: Number
+    Default: 524288
+    MinValue: 1
+  MaxEnvelopeBytes:
+    Type: Number
+    Default: 240000
+    MinValue: 1
+    MaxValue: 250000
+  MaxAiOperationsPerRun:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 3
+  WebhookThrottleRate:
+    Type: Number
+    Default: 1
+    MinValue: 1
+  WebhookThrottleBurst:
+    Type: Number
+    Default: 5
+    MinValue: 1
+  ArtifactRetentionDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+  NoncurrentVersionRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 1
+  DynamoMaxReadRequestUnits:
+    Type: Number
+    Default: 20
+    MinValue: 1
+  DynamoMaxWriteRequestUnits:
+    Type: Number
+    Default: 20
+    MinValue: 1
+  AlarmNotificationEmail:
+    Type: String
+    Default: ""
+
+Conditions:
+  HasAlarmNotificationEmail: !Not [!Equals [!Ref AlarmNotificationEmail, ""]]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [x86_64]
+    MemorySize: 256
+    Tracing: PassThrough
+    LoggingConfig:
+      LogFormat: JSON
+      ApplicationLogLevel: INFO
+      SystemLogLevel: WARN
+    Environment:
+      Variables:
+        PYTHONPATH: /var/task/src
+        ARCUS_ENV: !Ref Environment
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        S3_ARTIFACT_BUCKET: !Ref ContextArtifactsBucket
+        DDB_REVIEW_TABLE: !Ref ReviewHistoryTable
+        MAX_OUTPUT_TOKENS: !Ref MaxOutputTokens
+        MAX_PROMPT_BYTES: !Ref MaxPromptBytes
+        MAX_FINDINGS_PER_STAGE: !Ref MaxFindingsPerStage
+        MAX_FINDINGS_TOTAL: !Ref MaxFindingsTotal
+        MAX_CHANGED_FILES: !Ref MaxChangedFiles
+        MAX_DIFF_BYTES: !Ref MaxDiffBytes
+        MAX_ENVELOPE_BYTES: !Ref MaxEnvelopeBytes
+        MAX_AI_OPERATIONS_PER_RUN: !Ref MaxAiOperationsPerRun
+    Tags:
+      Project: Arcus
+      Environment: !Ref Environment
+      ManagedBy: SAM
+
+Resources:
+  ContextArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub arcus-${Environment}-context-artifacts
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpirePullRequestArtifacts
+            Prefix: prs/
+            Status: Enabled
+            ExpirationInDays: !Ref ArtifactRetentionDays
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref NoncurrentVersionRetentionDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+          - Id: ExpireNoncurrentGraphVersions
+            Prefix: graphs/
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref NoncurrentVersionRetentionDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - Key: Project
+          Value: Arcus
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+
+  ContextArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ContextArtifactsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt ContextArtifactsBucket.Arn
+              - !Sub ${ContextArtifactsBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  ReviewHistoryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub arcus-${Environment}-review-history
+      BillingMode: PAY_PER_REQUEST
+      OnDemandThroughput:
+        MaxReadRequestUnits: !Ref DynamoMaxReadRequestUnits
+        MaxWriteRequestUnits: !Ref DynamoMaxWriteRequestUnits
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Project
+          Value: Arcus
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: SAM
+
+  WebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub arcus-${Environment}-github-webhook-secret
+      Description: Populate the GitHub webhook HMAC secret outside CloudFormation.
+
+  GitHubAppPrivateKeySecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub arcus-${Environment}-github-app-private-key
+      Description: Populate the GitHub App PEM private key outside CloudFormation.
+
+  CostAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub arcus-${Environment}-cost-alarms
+
+  CostAlarmEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmNotificationEmail
+    Properties:
+      Protocol: email
+      Endpoint: !Ref AlarmNotificationEmail
+      TopicArn: !Ref CostAlarmTopic
+
+  WebhookApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/arcus-${Environment}-webhook
+      RetentionInDays: 14
+
+  WebhookHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Public GitHub webhook endpoint protected by HMAC and quotas.
+      StageName: "$default"
+      # The execute-api endpoint is enabled by default. Explicit false makes SAM emit
+      # an OpenAPI servers entry without the required url, which API Gateway rejects.
+      FailOnWarnings: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: !Ref WebhookThrottleBurst
+        ThrottlingRateLimit: !Ref WebhookThrottleRate
+      AccessLogSettings:
+        DestinationArn: !GetAtt WebhookApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","requestTime":"$context.requestTime",
+          "httpMethod":"$context.httpMethod","routeKey":"$context.routeKey",
+          "status":"$context.status","responseLength":"$context.responseLength"}
+      Tags:
+        Project: Arcus
+        Environment: !Ref Environment
+        ManagedBy: SAM
+
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-webhook
+      Description: Verifies and atomically limits GitHub webhook deliveries.
+      CodeUri: ../
+      Handler: arcus.entrypoints.webhook_handler.lambda_handler
+      Timeout: 5
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref PipelineStateMachine
+          WEBHOOK_SECRET_ARN: !Ref WebhookSecret
+          ALLOWED_REPOSITORIES: !Ref AllowedRepositories
+          ALLOWED_INSTALLATION_IDS: !Ref AllowedInstallationIds
+          REVIEWS_PER_REPOSITORY_DAY: !Ref ReviewsPerRepositoryDay
+          REVIEWS_PER_INSTALLATION_HOUR: !Ref ReviewsPerInstallationHour
+          ADMISSION_TTL_SECONDS: !Ref AdmissionTtlSeconds
+          MAX_WEBHOOK_BODY_BYTES: !Ref MaxWebhookBodyBytes
+          SECRET_CACHE_TTL_SECONDS: !Ref SecretCacheTtlSeconds
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadWebhookSecret
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref WebhookSecret
+            - Sid: AtomicWebhookAdmission
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:TransactWriteItems
+              Resource: !GetAtt ReviewHistoryTable.Arn
+            - Sid: StartReviewPipeline
+              Effect: Allow
+              Action: states:StartExecution
+              Resource: !Ref PipelineStateMachine
+      Events:
+        Webhook:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref WebhookHttpApi
+            Path: /webhook
+            Method: POST
+            PayloadFormatVersion: "2.0"
+
+  FetchPRFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-fetch-pr
+      Description: Downloads a bounded PR diff and changed-file list.
+      CodeUri: ../
+      Handler: arcus.entrypoints.fetch_pr.lambda_handler
+      Timeout: 75
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref GitHubAppId
+          GITHUB_APP_PRIVATE_KEY_SECRET_ARN: !Ref GitHubAppPrivateKeySecret
+          GITHUB_API_BASE_URL: https://api.github.com
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadGitHubPrivateKey
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref GitHubAppPrivateKeySecret
+            - Sid: PutPullRequestArtifacts
+              Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub ${ContextArtifactsBucket.Arn}/prs/*
+
+  ContextBuilderFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-context-builder
+      Description: Loads the seeded repository graph and persists bounded PR context.
+      CodeUri: ../
+      Handler: arcus.agents.context_builder.lambda_handler
+      Timeout: 45
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadWriteContextArtifacts
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource:
+                - !Sub ${ContextArtifactsBucket.Arn}/prs/*
+                - !Sub ${ContextArtifactsBucket.Arn}/graphs/*
+
+  ConsistencyCheckerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-consistency-checker
+      Description: Runs one bounded consistency review model operation.
+      CodeUri: ../
+      Handler: arcus.agents.consistency_checker.lambda_handler
+      Timeout: 90
+      Policies:
+        - &AnalysisPolicy
+          Version: "2012-10-17"
+          Statement:
+            - Sid: ReadAnalysisArtifacts
+              Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${ContextArtifactsBucket.Arn}/prs/*
+            - Sid: InvokeConfiguredBedrockModel
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockFoundationModelId}
+
+  BugHunterFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-bug-hunter
+      Description: Runs one bounded bug and security review model operation.
+      CodeUri: ../
+      Handler: arcus.agents.bug_hunter.lambda_handler
+      Timeout: 90
+      Policies:
+        - *AnalysisPolicy
+
+  FixSuggesterFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-fix-suggester
+      Description: Produces fixes in one bounded batch model operation.
+      CodeUri: ../
+      Handler: arcus.agents.fix_suggester.lambda_handler
+      Timeout: 90
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: InvokeConfiguredBedrockModel
+              Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/${BedrockModelId}
+                - !Sub arn:${AWS::Partition}:bedrock:*::foundation-model/${BedrockFoundationModelId}
+
+  ReporterFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-reporter
+      Description: Upserts one review comment and one idempotent history row.
+      CodeUri: ../
+      Handler: arcus.agents.reporter.lambda_handler
+      Timeout: 75
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref GitHubAppId
+          GITHUB_APP_PRIVATE_KEY_SECRET_ARN: !Ref GitHubAppPrivateKeySecret
+          GITHUB_API_BASE_URL: https://api.github.com
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadGitHubPrivateKey
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref GitHubAppPrivateKeySecret
+            - Sid: WriteReviewHistory
+              Effect: Allow
+              Action: dynamodb:PutItem
+              Resource: !GetAtt ReviewHistoryTable.Arn
+
+  WebhookFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${WebhookFunction}
+      RetentionInDays: 14
+
+  FetchPRLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${FetchPRFunction}
+      RetentionInDays: 14
+
+  ContextBuilderLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ContextBuilderFunction}
+      RetentionInDays: 14
+
+  ConsistencyCheckerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ConsistencyCheckerFunction}
+      RetentionInDays: 14
+
+  BugHunterLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${BugHunterFunction}
+      RetentionInDays: 14
+
+  FixSuggesterLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${FixSuggesterFunction}
+      RetentionInDays: 14
+
+  ReporterLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ReporterFunction}
+      RetentionInDays: 14
+
+  PipelineLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/vendedlogs/states/arcus-${Environment}-pr-pipeline
+      RetentionInDays: 14
+
+  PipelineStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub arcus-${Environment}-pr-pipeline-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokePipelineStages
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt FetchPRFunction.Arn
+                  - !GetAtt ContextBuilderFunction.Arn
+                  - !GetAtt ConsistencyCheckerFunction.Arn
+                  - !GetAtt BugHunterFunction.Arn
+                  - !GetAtt FixSuggesterFunction.Arn
+                  - !GetAtt ReporterFunction.Arn
+        - PolicyName: DeliverExecutionLogs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: "*"
+
+  PipelineStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub arcus-${Environment}-pr-pipeline
+      Type: STANDARD
+      Role: !GetAtt PipelineStateMachineRole.Arn
+      DefinitionUri: statemachine/pipeline.asl.json
+      DefinitionSubstitutions:
+        FetchPRFunctionArn: !GetAtt FetchPRFunction.Arn
+        ContextBuilderFunctionArn: !GetAtt ContextBuilderFunction.Arn
+        ConsistencyCheckerFunctionArn: !GetAtt ConsistencyCheckerFunction.Arn
+        BugHunterFunctionArn: !GetAtt BugHunterFunction.Arn
+        FixSuggesterFunctionArn: !GetAtt FixSuggesterFunction.Arn
+        ReporterFunctionArn: !GetAtt ReporterFunction.Arn
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt PipelineLogGroup.Arn
+        IncludeExecutionData: false
+        Level: ERROR
+      Tracing:
+        Enabled: false
+      Tags:
+        Project: Arcus
+        Environment: !Ref Environment
+        ManagedBy: SAM
+
+  HighWebhookInvocationsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub arcus-${Environment}-high-webhook-invocations
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WebhookFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 100
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref CostAlarmTopic]
+
+  WebhookThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub arcus-${Environment}-webhook-throttles
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WebhookFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref CostAlarmTopic]
+
+  HighPipelineStartsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub arcus-${Environment}-high-pipeline-starts
+      Namespace: AWS/States
+      MetricName: ExecutionsStarted
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref PipelineStateMachine
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref CostAlarmTopic]
+
+  PipelineFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub arcus-${Environment}-pipeline-failures
+      Namespace: AWS/States
+      MetricName: ExecutionsFailed
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref PipelineStateMachine
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref CostAlarmTopic]
+
+  HighBedrockInvocationsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub arcus-${Environment}-high-bedrock-invocations
+      Namespace: AWS/Bedrock
+      MetricName: Invocations
+      Dimensions:
+        - Name: ModelId
+          Value: !Ref BedrockModelId
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 30
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref CostAlarmTopic]
+
+  HighBedrockOutputTokensAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub arcus-${Environment}-high-bedrock-output-tokens
+      Namespace: AWS/Bedrock
+      MetricName: OutputTokenCount
+      Dimensions:
+        - Name: ModelId
+          Value: !Ref BedrockModelId
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 50000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref CostAlarmTopic]
+
+  DynamoThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub arcus-${Environment}-dynamodb-throttles
+      Namespace: AWS/DynamoDB
+      MetricName: ThrottledRequests
+      Dimensions:
+        - Name: TableName
+          Value: !Ref ReviewHistoryTable
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref CostAlarmTopic]
+
+Outputs:
+  WebhookApiId:
+    Value: !Ref WebhookHttpApi
+  WebhookUrl:
+    Value: !Sub https://${WebhookHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/webhook
+  WebhookFunctionArn:
+    Value: !GetAtt WebhookFunction.Arn
+  WebhookSecretArn:
+    Value: !Ref WebhookSecret
+  GitHubAppPrivateKeySecretArn:
+    Value: !Ref GitHubAppPrivateKeySecret
+  ContextArtifactsBucketName:
+    Value: !Ref ContextArtifactsBucket
+  ReviewHistoryTableName:
+    Value: !Ref ReviewHistoryTable
+  PipelineStateMachineArn:
+    Value: !Ref PipelineStateMachine
+  CostAlarmTopicArn:
+    Value: !Ref CostAlarmTopic
+  FetchPRFunctionArn:
+    Value: !GetAtt FetchPRFunction.Arn
+  ContextBuilderFunctionArn:
+    Value: !GetAtt ContextBuilderFunction.Arn
+  ConsistencyCheckerFunctionArn:
+    Value: !GetAtt ConsistencyCheckerFunction.Arn
+  BugHunterFunctionArn:
+    Value: !GetAtt BugHunterFunction.Arn
+  FixSuggesterFunctionArn:
+    Value: !GetAtt FixSuggesterFunction.Arn
+  ReporterFunctionArn:
+    Value: !GetAtt ReporterFunction.Arn

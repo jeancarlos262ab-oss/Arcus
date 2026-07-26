@@ -11,9 +11,10 @@ arcus/
 │   ├── template.yaml           # AWS SAM (o CDK) — recurso principal
 │   ├── statemachine/
 │   │   └── pipeline.asl.json   # Definición de la máquina de estados (Amazon States Language)
-│   └── env/
-│       ├── dev.json            # Parámetros por entorno
-│       └── demo.json
+│   ├── env/
+│   │   ├── dev.json            # Parámetros por entorno
+│   │   └── demo.json
+│   └── samconfig.toml.example  # despliegue no secreto por entorno
 │
 ├── src/
 │   └── arcus/
@@ -36,9 +37,9 @@ arcus/
 │       │   ├── fix_suggester.py
 │       │   └── reporter.py
 │       │
-│       ├── bedrock/            # Cliente Claude vía Bedrock + reintentos + parsing
+│       ├── bedrock/            # Cliente Bedrock Converse + reintentos + parsing
 │       │   ├── __init__.py
-│       │   ├── client.py       # invoke_claude() con retry/backoff
+│       │   ├── client.py       # invoke_model() con retry/backoff
 │       │   └── prompts/        # Plantillas de prompt por agente (archivos .md/.txt)
 │       │
 │       ├── graph/              # Construcción y persistencia del grafo de contexto
@@ -65,17 +66,32 @@ arcus/
 │   ├── src/
 │   │   ├── App.tsx             # ensamblado del dashboard
 │   │   ├── components/         # UI + charts (Recharts)
-│   │   └── lib/                # tipos, tema, datos (DataSource: mock hoy, API real después)
+│   │   └── lib/
+│   │       ├── types.ts       # tipos del dashboard
+│   │       ├── theme.ts       # tema visual
+│   │       ├── mockData.ts    # datos locales mientras no exista la API
+│   │       ├── simulate.ts    # flujo de demo local
+│   │       ├── runtimeConfig.ts # fallback display-only hasta conectar la API
+│   │       └── api.ts         # cliente de la API real (siguiente incremento)
+│   ├── .env.example            # valores VITE_* no secretos para desarrollo local
 │   └── package.json
 │
 ├── tests/
 │   ├── unit/
 │   ├── integration/
-│   └── fixtures/               # PRs de ejemplo, repos pequeños, respuestas Bedrock mock
+│   └── fixtures/
+│       ├── bedrock/           # respuestas del modelo mockeadas
+│       ├── envelopes/         # envelope por etapa del pipeline
+│       ├── graphs/             # grafos pequeños de repositorio
+│       ├── prs/                # PRs y diffs sembrados
+│       └── webhooks/           # payloads firmados de GitHub
 │
 ├── scripts/                    # utilidades locales (seed de grafo, replay de webhook)
-├── pyproject.toml
-├── requirements.txt
+├── .github/
+│   └── workflows/ci.yml       # validación dashboard + backend cuando exista
+├── .env.example                # configuración local no secreta
+├── pyproject.toml              # proyecto, dependencias y configuración de tooling
+├── uv.lock                     # lockfile versionado para builds reproducibles
 └── README.md
 ```
 
@@ -95,7 +111,7 @@ arcus/
 
 Prefijo `arcus-{env}-`:
 
-- S3 bucket grafos: `arcus-{env}-context-graphs`
+- S3 bucket de artefactos: `arcus-{env}-context-artifacts`
 - DynamoDB historial: `arcus-{env}-review-history`
 - State machine: `arcus-{env}-pr-pipeline`
 - Lambdas: `arcus-{env}-agent-{nombre}` y `arcus-{env}-webhook`

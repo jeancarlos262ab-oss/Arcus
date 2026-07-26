@@ -26,21 +26,31 @@ elimina el 90% de los bloqueos.
 
 Dueño de `infra/` y del `webhook_handler`. Desbloquea el despliegue de todos.
 
-- [ ] A1. Scaffolding de IaC (SAM/CDK): bucket S3, tabla DynamoDB, roles IAM base, stack `dev`.
-  - _Sin dependencias. Empieza día 1._ _Req: 2.3, 6.3._
-- [ ] A2. Definir la state machine `pipeline.asl.json` con 5 estados + `FetchPR`, usando
-  Lambdas **stub** (que devuelven el envelope de fixture sin cambios).
-  - _Depende de: contrato del envelope (Tarea 0)._ _Req: 1.5._
-- [ ] A3. Implementar `webhook_handler`: verificación HMAC, filtro de acción, dedup
+- [x] A1. Scaffolding SAM: bucket S3 cifrado y privado, tabla DynamoDB on-demand con TTL,
+  roles IAM base, logs, outputs y configuraciones para stacks `dev`/`demo`.
+  - Los datos persistentes usan `DeletionPolicy: Retain`; logs de demo se retienen 14 días.
+  - _Sin dependencias. Empieza día 1._ _Req: 2.3, 6.3, 8.2._
+- [x] A2. Definir la state machine Standard `pipeline.asl.json` con `FetchPR` + los 5
+  agentes, usando Lambdas **stub** independientes que devuelven el envelope sin cambios.
+  - Usar integración optimizada Lambda con `Payload.$: $` y `OutputPath: $.Payload` para
+    evitar que metadata del SDK rompa el contrato entre estados.
+  - Inyectar ARN con `DefinitionSubstitutions`, habilitar logs/tracing y terminar en `Done`.
+  - _Depende de: contrato del envelope (Tarea 0)._ _Req: 1.5, 8.2._
+- [x] A3. Implementar `webhook_handler`: verificación HMAC, filtro de acción, dedup
   condicional en DynamoDB, guardado inicial, `StartExecution`.
-  - _Depende de: A1 (tabla), Tarea 0 (envelope)._ _Req: 1.1-1.6, 7.5._
-- [ ] A4. API Gateway HTTP API → `webhook_handler`; Secrets Manager para webhook secret.
+  - `FetchPR`, no el webhook, descarga el diff y lista los archivos para cumplir el SLA.
+  - _Depende de: A1 (tabla), Tarea 0 (envelope), C4 (verificación/parsing)._ _Req: 1.1-1.6, 7.5._
+- [x] A4. API Gateway HTTP API → `webhook_handler`; Secrets Manager separado para webhook
+  secret y clave privada de GitHub App (sin valores secretos en parámetros CloudFormation).
   - _Depende de: A3._ _Req: 1.1, seguridad._
-- [ ] A5. Configurar `Retry`/`Catch` en cada estado (Catch → siguiente agente) + estado
-  `Pass` que marca `failed` desde `$.lastError`.
+- [x] A5. Configurar `Retry`/`Catch`: backoff para fallos transitorios, `Pass` por etapa que
+  reconstruye un `PipelineEnvelope` válido sin filtrar `lastError`, y Reporter siempre corre.
+  - Un fallo de `FetchPR` salta al Reporter con análisis `skipped`; un fallo final de Reporter
+    termina en `Fail` después de agotar reintentos.
   - _Depende de: A2._ _Req: 7.1, 7.2, 7.4._
-- [ ] A6. Reemplazar stubs por las Lambdas reales conforme los otros frentes entregan; IAM
-  de mínimo privilegio por Lambda.
+- [ ] A6. Reemplazar cada stub por la Lambda real conforme los otros frentes entregan;
+  actualizar `CodeUri`/`Handler`, empaquetar dependencias desde `uv.lock` y aplicar IAM de
+  mínimo privilegio por Lambda.
   - _Depende de: entregables de Frentes B, C._ _Integración._
 
 **Puede avanzar solo con:** stubs que devuelven fixtures. No necesita la lógica real de
@@ -52,8 +62,7 @@ nadie para tener el pipeline "caminando" el día 2.
 
 El corazón de Arcus. Dueño de `agents/`, `bedrock/`, `graph/`.
 
-- [ ] B1. `bedrock/client.py`: `invoke_claude()` con retry/backoff y parseo de respuesta;
-  mockeado en tests.
+- [x] B1. `bedrock/client.py`: `invoke_model()` mediante Bedrock Converse con el modelo configurado (Nova 2 Lite por defecto), retry/backoff y parseo de respuesta; mockeado en tests.
   - _Sin dependencias externas. Empieza día 1._ _Req: 7.2._
 - [ ] B2. `graph/builder.py`: tree-sitter (Python) → networkx (nodos/aristas del esquema
   del design) + detección heurística de convenciones.

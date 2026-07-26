@@ -1,0 +1,20 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "{\"fixes\":[{\"finding_id\":\"223e4567-e89b-42d3-a456-426614174001\",\"fix\":{\"description\":\"Raise the repository's typed configuration error at the environment boundary.\",\"suggested_diff\":\"@@ -16 +16 @@\\n- return RetryConfig.from_mapping(environ)\\n+ raise ConfigurationError.from_mapping(environ)\",\"confidence\":\"medium\"}},{\"finding_id\":\"323e4567-e89b-42d3-a456-426614174002\",\"fix\":{\"description\":\"Clamp the calculated delay after applying the exponential multiplier.\",\"suggested_diff\":\"@@ -22 +22 @@\\n- return 2**attempt\\n+ return min(2**attempt, 30.0)\",\"confidence\":\"high\"}}]}"
+        }
+      ]
+    }
+  },
+  "stopReason": "end_turn",
+  "usage": {
+    "inputTokens": 410,
+    "outputTokens": 190
+  },
+  "ResponseMetadata": {
+    "RequestId": "fixture-request-fix"
+  }
+}

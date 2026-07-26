@@ -1,0 +1,338 @@
+{
+  "Comment": "Arcus multi-agent pull request review pipeline",
+  "StartAt": "FetchPR",
+  "TimeoutSeconds": 600,
+  "States": {
+    "FetchPR": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${FetchPRFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "TimeoutSeconds": 90,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 8,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.lastError",
+          "Next": "MarkFetchPRFailed"
+        }
+      ],
+      "Next": "ContextBuilder"
+    },
+    "MarkFetchPRFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "pipeline_run_id.$": "$.pipeline_run_id",
+        "created_at.$": "$.created_at",
+        "pr.$": "$.pr",
+        "context": {
+          "status": "failed",
+          "error": {
+            "code": "lambda_infrastructure_failure",
+            "message": "Pipeline stage failed before returning a valid envelope"
+          },
+          "graph_ref": null,
+          "graph_version": null,
+          "relevant_subgraph_ref": null,
+          "conventions": null,
+          "ran_diff_only": true
+        },
+        "consistency": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "bugs": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "fixes": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "report.$": "$.report"
+      },
+      "Next": "Reporter"
+    },
+    "ContextBuilder": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ContextBuilderFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "TimeoutSeconds": 60,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 8,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.lastError",
+          "Next": "MarkContextBuilderFailed"
+        }
+      ],
+      "Next": "ConsistencyChecker"
+    },
+    "MarkContextBuilderFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "pipeline_run_id.$": "$.pipeline_run_id",
+        "created_at.$": "$.created_at",
+        "pr.$": "$.pr",
+        "context": {
+          "status": "failed",
+          "error": {
+            "code": "lambda_infrastructure_failure",
+            "message": "Pipeline stage failed before returning a valid envelope"
+          },
+          "graph_ref": null,
+          "graph_version": null,
+          "relevant_subgraph_ref": null,
+          "conventions": null,
+          "ran_diff_only": true
+        },
+        "consistency.$": "$.consistency",
+        "bugs.$": "$.bugs",
+        "fixes.$": "$.fixes",
+        "report.$": "$.report"
+      },
+      "Next": "ConsistencyChecker"
+    },
+    "ConsistencyChecker": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ConsistencyCheckerFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "TimeoutSeconds": 90,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 8,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.lastError",
+          "Next": "MarkConsistencyCheckerFailed"
+        }
+      ],
+      "Next": "BugHunter"
+    },
+    "MarkConsistencyCheckerFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "pipeline_run_id.$": "$.pipeline_run_id",
+        "created_at.$": "$.created_at",
+        "pr.$": "$.pr",
+        "context.$": "$.context",
+        "consistency": {
+          "status": "failed",
+          "error": {
+            "code": "lambda_infrastructure_failure",
+            "message": "Pipeline stage failed before returning a valid envelope"
+          },
+          "findings": []
+        },
+        "bugs.$": "$.bugs",
+        "fixes.$": "$.fixes",
+        "report.$": "$.report"
+      },
+      "Next": "BugHunter"
+    },
+    "BugHunter": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${BugHunterFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "TimeoutSeconds": 90,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 8,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.lastError",
+          "Next": "MarkBugHunterFailed"
+        }
+      ],
+      "Next": "FixSuggester"
+    },
+    "MarkBugHunterFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "pipeline_run_id.$": "$.pipeline_run_id",
+        "created_at.$": "$.created_at",
+        "pr.$": "$.pr",
+        "context.$": "$.context",
+        "consistency.$": "$.consistency",
+        "bugs": {
+          "status": "failed",
+          "error": {
+            "code": "lambda_infrastructure_failure",
+            "message": "Pipeline stage failed before returning a valid envelope"
+          },
+          "findings": []
+        },
+        "fixes.$": "$.fixes",
+        "report.$": "$.report"
+      },
+      "Next": "FixSuggester"
+    },
+    "FixSuggester": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${FixSuggesterFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "TimeoutSeconds": 90,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 8,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.lastError",
+          "Next": "MarkFixSuggesterFailed"
+        }
+      ],
+      "Next": "Reporter"
+    },
+    "MarkFixSuggesterFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "pipeline_run_id.$": "$.pipeline_run_id",
+        "created_at.$": "$.created_at",
+        "pr.$": "$.pr",
+        "context.$": "$.context",
+        "consistency.$": "$.consistency",
+        "bugs.$": "$.bugs",
+        "fixes": {
+          "status": "failed",
+          "error": {
+            "code": "lambda_infrastructure_failure",
+            "message": "Pipeline stage failed before returning a valid envelope"
+          },
+          "findings": []
+        },
+        "report.$": "$.report"
+      },
+      "Next": "Reporter"
+    },
+    "Reporter": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ReporterFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "TimeoutSeconds": 90,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 8,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.lastError",
+          "Next": "PipelineFailed"
+        }
+      ],
+      "Next": "Done"
+    },
+    "Done": {
+      "Type": "Succeed"
+    },
+    "PipelineFailed": {
+      "Type": "Fail",
+      "Error": "ReporterFailed",
+      "Cause": "Reporter exhausted its infrastructure retry; inspect execution history."
+    }
+  }
+}

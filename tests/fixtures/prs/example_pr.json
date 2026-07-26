@@ -1,0 +1,15 @@
+{
+  "repo_full_name": "acme/widgets",
+  "pr_number": 42,
+  "commit_sha": "abc123def4567890",
+  "installation_id": 123456,
+  "changed_files": [
+    "src/config.py",
+    "tests/test_config.py"
+  ],
+  "diff_ref": "s3://arcus-dev-context-artifacts/prs/acme/widgets/42/diff.patch",
+  "title": "Add configurable retry policy",
+  "base_branch": "main",
+  "head_branch": "feature/retry-policy",
+  "html_url": "https://github.com/acme/widgets/pull/42"
+}

@@ -1,0 +1,20 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "{\"findings\":[{\"id\":\"323e4567-e89b-42d3-a456-426614174002\",\"agent\":\"bug_hunter\",\"type\":\"logic_bug\",\"severity\":\"high\",\"file\":\"src/config.py\",\"line_start\":22,\"line_end\":22,\"title\":\"Retry backoff can exceed the configured maximum\",\"rationale\":\"The exponent is applied before the cap conversion, allowing an oversized delay for large attempts.\",\"evidence_refs\":[\"src/config.py:22\"],\"fix\":null}]}"
+        }
+      ]
+    }
+  },
+  "stopReason": "end_turn",
+  "usage": {
+    "inputTokens": 620,
+    "outputTokens": 190
+  },
+  "ResponseMetadata": {
+    "RequestId": "fixture-request-bugs"
+  }
+}

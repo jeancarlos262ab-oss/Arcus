@@ -1,0 +1,13 @@
+[
+  {"ParameterKey": "Environment", "ParameterValue": "demo"},
+  {"ParameterKey": "BedrockModelId", "ParameterValue": "us.amazon.nova-2-lite-v1:0"},
+  {"ParameterKey": "BedrockFoundationModelId", "ParameterValue": "amazon.nova-2-lite-v1:0"},
+  {"ParameterKey": "GitHubAppId", "ParameterValue": "123456"},
+  {"ParameterKey": "AllowedRepositories", "ParameterValue": "*"},
+  {"ParameterKey": "AllowedInstallationIds", "ParameterValue": "*"},
+  {"ParameterKey": "ReviewsPerRepositoryDay", "ParameterValue": "30"},
+  {"ParameterKey": "ReviewsPerInstallationHour", "ParameterValue": "5"},
+  {"ParameterKey": "WebhookThrottleRate", "ParameterValue": "1"},
+  {"ParameterKey": "WebhookThrottleBurst", "ParameterValue": "5"},
+  {"ParameterKey": "ArtifactRetentionDays", "ParameterValue": "30"}
+]

@@ -1,231 +1,117 @@
-"""Bug Hunter Agent - Detects logical bugs, edge cases, and potential runtime errors."""
+"""Bug Hunter stage using Bedrock Converse and persisted PR artifacts."""
+
+from __future__ import annotations
+
 import json
-import logging
-from typing import Any
+from functools import lru_cache
 
-from arcus.agents.base import agent_handler, mark_section_failed, mark_section_ok
-from arcus.bedrock.client import invoke_claude
-from arcus.contracts import Finding, Fix, PipelineEnvelope
-
-logger = logging.getLogger(__name__)
-
-
-def _generate_bug_detection_prompt(
-    diff_content: str,
-    context_info: dict[str, Any],
-    repo_name: str,
-    pr_number: int,
-) -> str:
-    """
-    Generate a prompt for Claude to detect bugs in code changes.
-
-    Args:
-        diff_content: Unified diff from the PR.
-        context_info: Code context (conventions, subgraph info).
-        repo_name: Repository name for context.
-        pr_number: PR number for context.
-
-    Returns:
-        Formatted prompt for Claude.
-    """
-    context_text = json.dumps(context_info, indent=2)
-
-    return f"""Analyze the following code diff for potential bugs, logical errors, and edge cases.
-
-**Project**: {repo_name} (PR #{pr_number})
-
-**Code Context**:
-{context_text}
-
-**Code Diff**:
-```patch
-{diff_content}
-```
-
-**Analysis Task**:
-1. Detect logical bugs (e.g., infinite loops, incorrect conditions)
-2. Identify potential runtime errors (e.g., null pointer dereferences, missing error handling)
-3. Find edge cases not handled (e.g., boundary conditions, empty inputs)
-4. Look for security issues (e.g., input validation, SQL injection, XSS)
-5. Spot performance problems (e.g., inefficient algorithms, N+1 queries)
-
-**Response Format**:
-Respond with a JSON array of findings. Each finding must have:
-- "file": file path
-- "line_start": starting line number
-- "line_end": ending line number
-- "title": short bug description
-- "rationale": explanation of the bug
-- "severity": "high", "medium", or "low"
-- "type": "logic_bug" or "security"
-- "suggested_fix": optional fix suggestion
-
-Example:
-[
-  {{
-    "file": "src/utils.py",
-    "line_start": 15,
-    "line_end": 18,
-    "title": "Potential null pointer dereference",
-    "rationale": "Variable 'user' may be None but is accessed without check",
-    "severity": "high",
-    "type": "logic_bug",
-    "suggested_fix": "Add None check before accessing user.name"
-  }}
-]
-
-If no bugs found, return empty array [].
-"""
+from arcus.agents.base import BaseAgent, build_analysis_prompt, load_relevant_graph
+from arcus.agents.runtime import artifacts, model, settings
+from arcus.bedrock.client import BedrockClient
+from arcus.config import Settings
+from arcus.contracts import (
+    AgentFindingsSection,
+    AgentStatus,
+    FindingAgent,
+    FindingType,
+    PipelineEnvelope,
+)
+from arcus.errors import AgentError, BedrockResponseError
+from arcus.storage.artifacts import S3ArtifactStore
 
 
-def _parse_claude_findings(
-    claude_response: str,
-    agent_name: str = "bug_hunter",
-) -> list[Finding]:
-    """
-    Parse Claude's JSON response into Finding objects.
+class BugHunterAgent(BaseAgent):
+    """Find logic and security defects using bounded diff and graph context."""
 
-    Args:
-        claude_response: Claude's response text.
-        agent_name: Name of the agent for finding attribution.
+    section_name = "bugs"
+    failure_code = "bug_analysis_failed"
 
-    Returns:
-        List of Finding objects.
-    """
-    findings: list[Finding] = []
+    def __init__(
+        self,
+        *,
+        model: BedrockClient,
+        artifact_store: S3ArtifactStore,
+        runtime_settings: Settings,
+    ) -> None:
+        """Create the stage with deterministic model and artifact boundaries."""
 
-    try:
-        # Extract JSON from response
-        response_text = claude_response.strip()
+        super().__init__(runtime_settings)
+        self._model = model
+        self._artifacts = artifact_store
 
-        # Try to find JSON array in response
-        json_start = response_text.find("[")
-        json_end = response_text.rfind("]") + 1
+    def process(self, envelope: PipelineEnvelope) -> PipelineEnvelope:
+        """Read bounded artifacts, invoke Converse once, and validate findings."""
 
-        if json_start == -1 or json_end == 0:
-            logger.warning("No JSON array found in Claude response")
-            return findings
-
-        json_str = response_text[json_start:json_end]
-        items = json.loads(json_str)
-
-        if not isinstance(items, list):
-            logger.warning("Claude response is not a JSON array")
-            return findings
-
-        for idx, item in enumerate(items):
-            try:
-                # Map Claude response to Finding model
-                fix_data = None
-                if item.get("suggested_fix"):
-                    fix_data = Fix(
-                        description=item.get("suggested_fix", ""),
-                        suggested_diff="",
-                        confidence="medium",
-                    )
-
-                finding = Finding(
-                    id=f"{agent_name}-bug-{idx}",
-                    agent=agent_name,
-                    type=item.get("type", "logic_bug"),
-                    severity=item.get("severity", "medium"),
-                    file=item.get("file", "unknown"),
-                    line_start=int(item.get("line_start", 0)),
-                    line_end=int(item.get("line_end", 0)),
-                    title=item.get("title", "Potential bug"),
-                    rationale=item.get("rationale", ""),
-                    evidence_refs=[],
-                    fix=fix_data,
-                )
-                findings.append(finding)
-
-            except (ValueError, TypeError, KeyError) as e:
-                logger.warning(f"Failed to parse finding item {idx}: {e}")
-                continue
-
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse Claude JSON response: {e}")
-        return findings
-
-    return findings
-
-
-@agent_handler
-def handle_bug_hunter(envelope: PipelineEnvelope) -> PipelineEnvelope:
-    """
-    Detect logical bugs and potential runtime errors in code changes.
-
-    Handler for Bug Hunter Agent (B6).
-    - Reads diff and code context
-    - Invokes Claude for bug detection
-    - Populates envelope.bugs with findings
-
-    Args:
-        envelope: PipelineEnvelope with PR context.
-
-    Returns:
-        Updated envelope with bug findings.
-    """
-    try:
-        logger.info(
-            f"Bug Hunter analyzing {envelope.pr.repo_full_name}#{envelope.pr.pr_number}"
-        )
-
-        # Step 1: Extract context information
-        context_dict = {
-            "conventions": {
-                "naming": envelope.context.conventions.naming if envelope.context.conventions else None,
-                "error_handling": envelope.context.conventions.error_handling if envelope.context.conventions else None,
-            },
-            "graph_info": {
-                "version": envelope.context.graph_version,
-                "subgraph_ref": envelope.context.relevant_subgraph_ref,
-            },
+        if envelope.pr.diff_ref is None:
+            raise AgentError("pull request diff is unavailable", code="missing_diff")
+        diff = self._artifacts.get_text(envelope.pr.diff_ref)
+        graph = load_relevant_graph(envelope, self._artifacts.get_text)
+        context = {
             "changed_files": envelope.pr.changed_files,
+            "ran_diff_only": envelope.context.ran_diff_only,
+            "conventions": (
+                envelope.context.conventions.model_dump(mode="json")
+                if envelope.context.conventions is not None
+                else None
+            ),
         }
-
-        # Step 2: Read diff content
-        # In MVP, we'll use a simple placeholder or mock diff
-        # In production, fetch from envelope.pr.diff_ref (S3)
-        diff_content = f"# Diff for {envelope.pr.repo_full_name} PR #{envelope.pr.pr_number}"
-
-        # Step 3: Generate prompt for Claude
-        prompt = _generate_bug_detection_prompt(
-            diff_content=diff_content,
-            context_info=context_dict,
-            repo_name=envelope.pr.repo_full_name,
-            pr_number=envelope.pr.pr_number,
+        prompt = build_analysis_prompt(
+            _build_instructions(envelope, context),
+            diff,
+            graph,
+            max_bytes=self._settings.max_prompt_bytes,
         )
-
-        # Step 4: Invoke Claude
-        logger.debug(
-            f"Invoking Claude for bug detection (repo={envelope.pr.repo_full_name})"
+        findings = self._model.parse_findings(
+            self._model.invoke_model(
+                prompt,
+                max_tokens=self._settings.max_output_tokens,
+            )
         )
-        claude_response = invoke_claude(
-            prompt=prompt,
-            system_prompt="You are an expert bug hunter. Analyze code for logical errors, edge cases, and security issues. Respond only with valid JSON.",
-            max_tokens=2048,
-        )
-
-        # Step 5: Parse findings
-        findings = _parse_claude_findings(claude_response)
-        logger.info(f"Found {len(findings)} potential bugs")
-
-        # Step 6: Update envelope
-        envelope.bugs.status = "ok"
-        envelope.bugs.findings = findings
-        envelope.bugs.error = None
-
-        mark_section_ok(envelope, "bugs")
-
-        return envelope
-
-    except Exception as e:
-        logger.error(f"Bug Hunter failed: {type(e).__name__}: {e}", exc_info=True)
-        mark_section_failed(
-            envelope,
-            "bugs",
-            error_code="bug_detection_failed",
-            error_message=f"Failed to detect bugs: {str(e)}",
+        for finding in findings:
+            if finding.agent is not FindingAgent.BUG_HUNTER:
+                raise BedrockResponseError("Bug response used the wrong agent")
+            if finding.type not in {FindingType.LOGIC_BUG, FindingType.SECURITY}:
+                raise BedrockResponseError("Bug response used an invalid finding type")
+        envelope.bugs = AgentFindingsSection(
+            status=AgentStatus.OK,
+            findings=findings,
         )
         return envelope
+
+
+def _build_instructions(
+    envelope: PipelineEnvelope,
+    context: dict[str, object],
+) -> str:
+    """Build deterministic instructions requesting the exact Finding contract."""
+
+    return (
+        "You are Arcus Bug Hunter. Review the supplied unified diff for logic "
+        "bugs, unsafe edge cases, and security defects. Use repository graph "
+        "relationships to inspect dependencies and dependents represented in the "
+        "provided context. Return JSON as "
+        '{"findings": [...]} where every item has id (UUID), '
+        'agent="bug_hunter", type (logic_bug or security), severity, file, '
+        "line_start, line_end, title, rationale, evidence_refs, and fix=null. "
+        "Return an empty findings array when there are no actionable defects.\n\n"
+        f"Repository: {envelope.pr.repo_full_name}\n"
+        f"PR: {envelope.pr.pr_number}\n"
+        f"Context: {json.dumps(context, separators=(',', ':'))}"
+    )
+
+
+@lru_cache(maxsize=1)
+def _agent() -> BugHunterAgent:
+    """Reuse the stage and clients across warm invocations."""
+
+    return BugHunterAgent(
+        model=model(),
+        artifact_store=artifacts(),
+        runtime_settings=settings(),
+    )
+
+
+def lambda_handler(event: dict[str, object], _context: object) -> dict[str, object]:
+    """Run Bug Hunter for one validated pipeline envelope."""
+
+    return _agent().run(event)

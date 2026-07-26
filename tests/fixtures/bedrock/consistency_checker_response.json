@@ -1,0 +1,20 @@
+{
+  "output": {
+    "message": {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "{\"findings\":[{\"id\":\"223e4567-e89b-42d3-a456-426614174001\",\"agent\":\"consistency_checker\",\"type\":\"convention_violation\",\"severity\":\"medium\",\"file\":\"src/config.py\",\"line_start\":16,\"line_end\":16,\"title\":\"Configuration loader bypasses the shared error policy\",\"rationale\":\"The repository convention is to raise a typed configuration error at the boundary.\",\"evidence_refs\":[\"src/config.py:16\"],\"fix\":null}]}"
+        }
+      ]
+    }
+  },
+  "stopReason": "end_turn",
+  "usage": {
+    "inputTokens": 512,
+    "outputTokens": 180
+  },
+  "ResponseMetadata": {
+    "RequestId": "fixture-request-consistency"
+  }
+}

@@ -1,232 +1,174 @@
-"""Reporter Agent - Generates consolidated PR review report."""
-import logging
-from datetime import datetime
+"""Reporter stage posting one idempotent GitHub comment and history row."""
 
-from arcus.agents.base import agent_handler, mark_section_failed, mark_section_ok
-from arcus.contracts import PipelineEnvelope
+from __future__ import annotations
 
-logger = logging.getLogger(__name__)
+from functools import lru_cache
+
+from arcus.agents.base import BaseAgent
+from arcus.agents.runtime import history, settings
+from arcus.config import Settings
+from arcus.contracts import (
+    AgentStatus,
+    Finding,
+    FixSuggestion,
+    PipelineEnvelope,
+    ReportSection,
+    Severity,
+)
+from arcus.github.api import GitHubClient
+from arcus.github.runtime import github_client
+from arcus.storage.history import ReviewHistoryStore
 
 
-def _generate_markdown_report(envelope: PipelineEnvelope) -> str:
-    """
-    Generate a comprehensive Markdown report from the envelope.
+class ReporterAgent(BaseAgent):
+    """Render all surviving stage results and persist the final review."""
 
-    Args:
-        envelope: PipelineEnvelope with all analysis results.
+    section_name = "report"
+    failure_code = "report_generation_failed"
+    continue_on_error = False
 
-    Returns:
-        Markdown-formatted report.
-    """
-    lines: list[str] = []
+    def __init__(
+        self,
+        github: GitHubClient,
+        history_store: ReviewHistoryStore,
+        runtime_settings: Settings,
+    ) -> None:
+        """Create Reporter with idempotent GitHub and DynamoDB boundaries."""
 
-    # Header
-    lines.append("# Code Review Report")
-    lines.append("")
-    lines.append(f"**Repository**: {envelope.pr.repo_full_name}")
-    lines.append(f"**PR #**: {envelope.pr.pr_number}")
-    lines.append(f"**Commit**: `{envelope.pr.commit_sha}`")
-    lines.append(f"**Report Generated**: {datetime.now().isoformat()}")
-    lines.append("")
+        super().__init__(runtime_settings)
+        self._github = github
+        self._history = history_store
 
-    # Executive Summary
-    lines.append("## Executive Summary")
-    lines.append("")
+    def process(self, envelope: PipelineEnvelope) -> PipelineEnvelope:
+        """Upsert the review comment and deterministic history record."""
 
-    # Count findings by severity
-    consistency_findings = envelope.consistency.findings or []
-    bug_findings = envelope.bugs.findings or []
-    all_findings = consistency_findings + bug_findings
-
-    high_count = sum(1 for f in all_findings if f.severity == "high")
-    medium_count = sum(1 for f in all_findings if f.severity == "medium")
-    low_count = sum(1 for f in all_findings if f.severity == "low")
-
-    lines.append(f"**Total Issues Found**: {len(all_findings)}")
-    lines.append(f"- 🔴 **High Severity**: {high_count}")
-    lines.append(f"- 🟡 **Medium Severity**: {medium_count}")
-    lines.append(f"- 🟢 **Low Severity**: {low_count}")
-    lines.append("")
-
-    # Pipeline Status
-    lines.append("## Analysis Status")
-    lines.append("")
-    lines.append(f"- Context: `{envelope.context.status}`")
-    lines.append(f"- Consistency: `{envelope.consistency.status}`")
-    lines.append(f"- Bugs: `{envelope.bugs.status}`")
-    lines.append(f"- Fixes: `{envelope.fixes.status}`")
-    lines.append("")
-
-    # Consistency Findings
-    if consistency_findings:
-        lines.append("## Consistency Issues")
-        lines.append("")
-        for finding in consistency_findings:
-            _add_finding_to_report(lines, finding)
-        lines.append("")
-
-    # Bug Findings
-    if bug_findings:
-        lines.append("## Bugs & Security Issues")
-        lines.append("")
-        for finding in bug_findings:
-            _add_finding_to_report(lines, finding)
-        lines.append("")
-
-    # Suggested Fixes
-    if envelope.fixes.findings:
-        lines.append("## Suggested Fixes")
-        lines.append("")
-        fixes_with_suggestions = [f for f in envelope.fixes.findings if f.fix]
-        if fixes_with_suggestions:
-            for finding in fixes_with_suggestions:
-                _add_fix_to_report(lines, finding)
-        else:
-            lines.append("No automated fixes generated.")
-        lines.append("")
-
-    # Code Conventions (from context)
-    if envelope.context.conventions:
-        lines.append("## Detected Code Conventions")
-        lines.append("")
-        lines.append(f"- **Naming Convention**: {envelope.context.conventions.naming}")
-        lines.append(
-            f"- **Error Handling**: {envelope.context.conventions.error_handling}"
+        markdown = generate_markdown_report(envelope)
+        comment_url = self._github.upsert_review_comment(
+            envelope.pr.repo_full_name,
+            envelope.pr.pr_number,
+            envelope.pr.installation_id,
+            markdown,
         )
-        if envelope.context.conventions.notes:
-            lines.append("- **Notes**:")
-            for note in envelope.context.conventions.notes:
-                lines.append(f"  - {note}")
-        lines.append("")
-
-    # Recommendations
-    lines.append("## Recommendations")
-    lines.append("")
-    if high_count > 0:
-        lines.append(
-            "⚠️ **Address all HIGH severity issues before merging**. "
-            "These may cause runtime failures or security vulnerabilities."
+        envelope.report = ReportSection(
+            status=AgentStatus.OK,
+            comment_url=comment_url,
+            summary=_summary(envelope),
         )
-        lines.append("")
-    if medium_count > 0:
-        lines.append(
-            "→ **Review MEDIUM severity issues** carefully. "
-            "Consider applying suggested fixes or addressing root causes."
+        self._history.put(envelope)
+        return envelope
+
+
+def generate_markdown_report(envelope: PipelineEnvelope) -> str:
+    """Render deterministic Markdown for one GitHub review comment."""
+
+    findings = [*envelope.consistency.findings, *envelope.bugs.findings]
+    counts = {
+        severity: sum(finding.severity is severity for finding in findings)
+        for severity in Severity
+    }
+    lines = [
+        "# Arcus review",
+        "",
+        f"Repository: `{envelope.pr.repo_full_name}`",
+        f"PR: **#{envelope.pr.pr_number}**",
+        f"Commit: `{envelope.pr.commit_sha}`",
+        "",
+        "## Summary",
+        "",
+        f"- High: **{counts[Severity.HIGH]}**",
+        f"- Medium: **{counts[Severity.MEDIUM]}**",
+        f"- Low: **{counts[Severity.LOW]}**",
+        f"- Context mode: **{'diff-only' if envelope.context.ran_diff_only else 'graph + diff'}**",
+        "",
+        "## Pipeline status",
+        "",
+        f"- Context: `{envelope.context.status.value}`",
+        f"- Consistency: `{envelope.consistency.status.value}`",
+        f"- Bugs: `{envelope.bugs.status.value}`",
+        f"- Fixes: `{envelope.fixes.status.value}`",
+    ]
+    failed_sections = [
+        (name, section.error)
+        for name, section in (
+            ("context", envelope.context),
+            ("consistency", envelope.consistency),
+            ("bugs", envelope.bugs),
+            ("fixes", envelope.fixes),
         )
-        lines.append("")
-    if low_count > 0:
-        lines.append(
-            "💡 **LOW severity findings** are suggestions for improvement. "
-            "Consider them for future refactoring."
-        )
-        lines.append("")
+        if section.status is AgentStatus.FAILED
+    ]
+    if failed_sections:
+        lines.extend(["", "## Degraded stages", ""])
+        for name, error in failed_sections:
+            if error is not None:
+                lines.append(f"- **{name}**: `{error.code}` — {error.message}")
 
-    if not all_findings:
-        lines.append("✅ **No issues found!** Code looks good.")
-        lines.append("")
+    if findings:
+        lines.extend(["", "## Findings", ""])
+        fixes = {finding.id: finding.fix for finding in envelope.fixes.findings}
+        for finding in findings:
+            _append_finding(lines, finding, fixes.get(finding.id))
+    else:
+        lines.extend(["", "No actionable findings were detected."])
 
-    # Footer
-    lines.append("---")
-    lines.append("*Report generated by Arcus PR Review Pipeline*")
-    lines.append(f"*Pipeline Run ID: {envelope.pipeline_run_id}*")
-
+    lines.extend(
+        [
+            "",
+            "---",
+            f"Pipeline run: `{envelope.pipeline_run_id}`",
+        ]
+    )
     return "\n".join(lines)
 
 
-def _add_finding_to_report(lines: list[str], finding) -> None:  # type: ignore
-    """Add a finding to the report."""
-    severity_icon = {
-        "high": "🔴",
-        "medium": "🟡",
-        "low": "🟢",
-    }.get(finding.severity, "•")
+def _append_finding(
+    lines: list[str],
+    finding: Finding,
+    fix: FixSuggestion | None,
+) -> None:
+    """Append one finding and its optional enriched fix."""
 
-    lines.append(f"### {severity_icon} {finding.title}")
-    lines.append("")
-    lines.append(f"**File**: `{finding.file}:{finding.line_start}-{finding.line_end}`")
-    lines.append(f"**Type**: {finding.type}")
-    lines.append(f"**Severity**: {finding.severity}")
-    lines.append("")
-    lines.append(f"{finding.rationale}")
-    lines.append("")
-
-    if finding.evidence_refs:
-        lines.append("**References**:")
-        for ref in finding.evidence_refs:
-            lines.append(f"- {ref}")
-        lines.append("")
-
-
-def _add_fix_to_report(lines: list[str], finding) -> None:  # type: ignore
-    """Add a fix suggestion to the report."""
-    if not finding.fix:
-        return
-
-    lines.append(f"### Fix for: {finding.title}")
-    lines.append("")
-    lines.append(f"**File**: `{finding.file}`")
-    lines.append(f"**Confidence**: {finding.fix.confidence}")
-    lines.append("")
-    lines.append(f"**Description**: {finding.fix.description}")
-    lines.append("")
-
-    if finding.fix.suggested_diff:
-        lines.append("**Suggested Change**:")
-        lines.append("")
-        lines.append("```python")
-        lines.append(finding.fix.suggested_diff)
-        lines.append("```")
-        lines.append("")
-
-
-@agent_handler
-def handle_reporter(envelope: PipelineEnvelope) -> PipelineEnvelope:
-    """
-    Generate consolidated PR review report.
-
-    Handler for Reporter Agent (B8).
-    - Reads all analysis results from envelope
-    - Generates comprehensive Markdown report
-    - Populates envelope.report with summary
-
-    Args:
-        envelope: PipelineEnvelope with complete analysis results.
-
-    Returns:
-        Updated envelope with report summary.
-    """
-    try:
-        logger.info(
-            f"Reporter generating report for {envelope.pr.repo_full_name}#{envelope.pr.pr_number}"
+    lines.extend(
+        [
+            f"### [{finding.severity.value.upper()}] {finding.title}",
+            "",
+            f"`{finding.file}:{finding.line_start}-{finding.line_end}` · `{finding.type.value}`",
+            "",
+            finding.rationale,
+        ]
+    )
+    if fix is not None:
+        lines.extend(
+            [
+                "",
+                f"**Suggested fix ({fix.confidence.value})**: {fix.description}",
+                "",
+                "```diff",
+                fix.suggested_diff,
+                "```",
+            ]
         )
+    lines.append("")
 
-        # Step 1: Generate report
-        report_md = _generate_markdown_report(envelope)
-        logger.debug(f"Generated report: {len(report_md)} characters")
 
-        # Step 2: Create summary (first 200 chars of report)
-        summary = report_md.split("\n")[0:5]  # First few lines
-        summary_text = "\n".join(summary)
+def _summary(envelope: PipelineEnvelope) -> str:
+    """Return a compact deterministic summary for DynamoDB/dashboard reads."""
 
-        # Step 3: Update envelope
-        envelope.report.status = "ok"
-        envelope.report.summary = summary_text
-        envelope.report.comment_url = None  # In production, this would be set to the GitHub comment URL
+    findings = [*envelope.consistency.findings, *envelope.bugs.findings]
+    high = sum(finding.severity is Severity.HIGH for finding in findings)
+    medium = sum(finding.severity is Severity.MEDIUM for finding in findings)
+    low = sum(finding.severity is Severity.LOW for finding in findings)
+    return f"{len(findings)} findings: {high} high, {medium} medium, {low} low"
 
-        # Store full report in metadata if needed
-        # In production, this could be stored in S3 and referenced
-        logger.info("Report generated successfully")
 
-        mark_section_ok(envelope, "report")
+@lru_cache(maxsize=1)
+def _agent() -> ReporterAgent:
+    """Reuse GitHub and DynamoDB clients across warm invocations."""
 
-        return envelope
+    return ReporterAgent(github_client(), history(), settings())
 
-    except Exception as e:
-        logger.error(f"Reporter failed: {type(e).__name__}: {e}", exc_info=True)
-        mark_section_failed(
-            envelope,
-            "report",
-            error_code="report_generation_failed",
-            error_message=f"Failed to generate report: {str(e)}",
-        )
-        return envelope
+
+def lambda_handler(event: dict[str, object], _context: object) -> dict[str, object]:
+    """Run Reporter for one validated pipeline envelope."""
+
+    return _agent().run(event)

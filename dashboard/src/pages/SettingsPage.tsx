@@ -76,20 +76,32 @@ export function SettingsPage() {
                 ]}
               />
             </Field>
-            <Field label="Región AWS">
+            <Field
+              label="Región AWS"
+              hint="La región de ejecución la controla el backend desplegado."
+            >
               <input
-                className="input"
+                className="input cursor-not-allowed opacity-75"
                 value={settings.region}
-                onChange={(e) => updateSettings({ region: e.target.value })}
+                readOnly
+                aria-readonly="true"
               />
             </Field>
-            <Field label="Modelo (Bedrock)">
+            <Field
+              label="Modelo (Bedrock)"
+              hint="El modelo se configura en Lambda mediante BEDROCK_MODEL_ID."
+            >
               <input
-                className="input font-mono text-xs"
+                className="input cursor-not-allowed font-mono text-xs opacity-75"
                 value={settings.modelId}
-                onChange={(e) => updateSettings({ modelId: e.target.value })}
+                readOnly
+                aria-readonly="true"
               />
             </Field>
+            <p className="text-[0.78rem] text-muted">
+              Estos valores son informativos y no se guardan como configuración de ejecución en
+              el navegador.
+            </p>
           </div>
         </Panel>
 
@@ -136,23 +148,24 @@ export function SettingsPage() {
         {/* Integración GitHub */}
         <Panel title="Integración GitHub" subtitle="Credenciales de la GitHub App">
           <div className="space-y-4">
-            <Field label="GitHub App ID" hint="Se obtiene al registrar la App en GitHub.">
+            <Field
+              label="GitHub App ID"
+              hint="Se obtiene al registrar la App en GitHub y lo informa el backend."
+            >
               <input
-                className="input"
-                placeholder="123456"
+                className="input cursor-not-allowed opacity-75"
+                placeholder="Configurado en el backend"
                 value={settings.githubAppId}
-                onChange={(e) => updateSettings({ githubAppId: e.target.value })}
+                readOnly
+                aria-readonly="true"
               />
             </Field>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-semibold text-ink">Webhook configurado</div>
-                <div className="text-[0.78rem] text-muted">Firma HMAC verificada en el endpoint</div>
+                <div className="text-[0.78rem] text-muted">Firma HMAC verificada por el backend</div>
               </div>
-              <Toggle
-                checked={settings.webhookConfigured}
-                onChange={(v) => updateSettings({ webhookConfigured: v })}
-              />
+              <Toggle checked={settings.webhookConfigured} disabled />
             </div>
             <div
               className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${
@@ -163,11 +176,11 @@ export function SettingsPage() {
             >
               {settings.githubAppId && settings.webhookConfigured ? (
                 <>
-                  <Check size={14} /> Integración lista (simulada)
+                  <Check size={14} /> Integración lista
                 </>
               ) : (
                 <>
-                  <TriangleAlert size={14} /> Completa el App ID y activa el webhook
+                  <TriangleAlert size={14} /> Configura la GitHub App y el webhook en AWS
                 </>
               )}
             </div>

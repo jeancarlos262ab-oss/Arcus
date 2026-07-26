@@ -6,29 +6,46 @@ manejo de errores robusto en todo lo que toque AWS/Bedrock (donde fallan las cos
 ## Versión y herramientas
 
 - Python 3.12.
+- Gestión de dependencias y entornos: **uv**. `pyproject.toml` es la fuente de verdad y
+  `uv.lock` se versiona. No mantener un `requirements.txt` manual.
+- Crear/sincronizar el entorno con `uv sync --dev`; ejecutar herramientas con `uv run`.
+  CI debe usar `uv sync --locked --dev` para impedir cambios implícitos del lockfile.
 - Formateo: **ruff** (formatter + linter). Nada de discusiones de estilo a mano.
 - Tipado: **mypy** en modo estricto para `src/arcus/contracts/`, `graph/`, `github/`.
 - Config en `pyproject.toml`. Correr `ruff check --fix` y `mypy` antes de cada commit.
+- Para empaquetar Lambdas con SAM, generar cualquier archivo de requisitos temporal desde
+  `uv.lock` (`uv export --locked --no-dev`) en lugar de editar dependencias a mano.
+- Bedrock se consume desde el backend, nunca desde el navegador. El modelo se configura
+  mediante `BEDROCK_MODEL_ID`; el valor inicial del MVP es
+  `us.amazon.nova-2-lite-v1:0` en `us-east-1`.
 
 ## Type hints (obligatorio)
 
 - Toda función pública lleva type hints completos en parámetros y retorno.
+- Usar `from __future__ import annotations` en módulos Python nuevos y preferir `T | None`
+  sobre `Optional[T]`.
 - Nada de `Any` salvo en el borde crudo de un parseo externo (payload de webhook,
-  respuesta HTTP). En cuanto entra al sistema se convierte a un modelo Pydantic.
+  respuesta HTTP o respuesta sin validar de un SDK). En cuanto entra al sistema se convierte
+  a un modelo Pydantic o a un tipo explícito.
 - Preferir tipos concretos (`list[Finding]`) sobre genéricos vagos (`list`, `dict`).
+- No silenciar errores de mypy con `# type: ignore`; si es imprescindible, limitarlo a
+  una línea y documentar la razón.
 
 ```python
-def build_repo_graph(repo_path: Path, languages: list[str]) -> RepoGraph:
-    ...
+def build_repo_graph(repo_path: Path, languages: list[str]) -> RepoGraph: ...
 ```
 
 ## Modelos de datos: Pydantic v2
 
 - Todo dato que cruce un límite (Lambda↔Lambda, agente↔agente, servicio↔servicio)
   es un modelo Pydantic definido en `src/arcus/contracts/`.
+- Los contratos compartidos deben rechazar campos desconocidos (`extra="forbid"`) y
+  validar los límites de dominio en el borde.
 - Serialización a Step Functions: `model.model_dump(mode="json")`.
 - Deserialización en el handler: `Envelope.model_validate(event)`.
 - Los modelos validan en el borde; el resto del código asume datos ya válidos.
+- No pasar diccionarios sin validar entre agentes. Si un SDK devuelve datos crudos, validar
+  primero con un modelo o `TypeAdapter` y después trabajar con tipos concretos.
 
 ## Docstrings
 
@@ -83,17 +100,33 @@ Parámetros por defecto:
 - GitHub: respetar `Retry-After` en 403/429; máx 3 intentos.
 
 ```python
-from arcus.retry import with_retries
 from arcus.errors import TransientError
+from arcus.retry import with_retries
+
 
 @with_retries(max_attempts=5, base_delay=2.0, max_delay=30.0)
-def invoke_claude(prompt: str, *, max_tokens: int = 4096) -> str:
+def invoke_model(
+    prompt: str,
+    *,
+    model_id: str,
+    max_tokens: int = 1200,
+) -> str:
     try:
-        resp = bedrock.invoke_model(...)
-    except bedrock.exceptions.ThrottlingException as e:
-        raise TransientError("Bedrock throttled") from e
-    return _extract_text(resp)
+        response = bedrock_runtime.converse(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+            inferenceConfig={"maxTokens": max_tokens, "temperature": 0.0},
+        )
+    except bedrock_runtime.exceptions.ThrottlingException as error:
+        raise TransientError("Bedrock throttled") from error
+    return extract_validated_text(response)
 ```
+
+- Usar la API **Converse** para mantener el adaptador intercambiable entre modelos.
+- Validar la salida del modelo con Pydantic incluso cuando el modelo soporte structured
+  output; nunca confiar solo en JSON generado por prompt.
+- Registrar uso de tokens y latencia, pero no el prompt completo, el diff ni la respuesta
+  completa.
 
 - Toda escritura debe ser **idempotente** (usar `pr_id` + `commit_sha` como clave) para
   que un reintento no duplique comentarios ni filas.
@@ -106,7 +139,14 @@ def invoke_claude(prompt: str, *, max_tokens: int = 4096) -> str:
 
 ## Config
 
-- Toda config vía variables de entorno leídas una vez en `config.py`. Nada de
-  constantes hardcodeadas de nombres de recursos dispersas en el código.
+- Toda config vía variables de entorno leídas una vez en `config.py` (preferiblemente a
+  través de una función cacheada). Nada de constantes hardcodeadas de nombres de recursos
+  dispersas en el código.
+- Configuración mínima del runtime: `AWS_REGION`, `BEDROCK_MODEL_ID`, nombres de S3,
+  DynamoDB, Step Functions y el ARN del secreto de GitHub.
+- El valor por defecto del MVP para `BEDROCK_MODEL_ID` es
+  `us.amazon.nova-2-lite-v1:0`; debe poder cambiarse sin modificar prompts ni agentes.
 - Secretos (GitHub App private key, webhook secret) vienen de AWS Secrets Manager,
-  nunca del repo.
+  nunca del repo, del frontend ni de parámetros plaintext de CloudFormation.
+- No registrar secretos, tokens temporales, prompts completos, diffs completos ni respuestas
+  completas del modelo.
