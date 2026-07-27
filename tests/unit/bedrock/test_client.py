@@ -263,6 +263,33 @@ def test_valid_json_that_violates_finding_contract_is_rejected() -> None:
         parse_findings('{"findings": [{"unexpected": true}]}')
 
 
+def test_finding_validation_error_reports_safe_bounded_details() -> None:
+    """Contract diagnostics identify fields without exposing generated values."""
+
+    private_value = "PRIVATE MODEL OUTPUT"
+    finding = {
+        "id": "323e4567-e89b-42d3-a456-426614174002",
+        "agent": private_value,
+        "type": "logic_bug",
+        "severity": "high",
+        "file": "src/a.py",
+        "line_start": 1,
+        "line_end": 1,
+        "title": "Bug",
+        "rationale": "Reason",
+        "evidence_refs": [],
+        "fix": None,
+    }
+
+    with pytest.raises(BedrockResponseError) as raised:
+        parse_findings(json.dumps({"findings": [finding]}))
+
+    message = str(raised.value)
+    assert "findings[0].agent" in message
+    assert "enum" in message
+    assert private_value not in message
+
+
 def test_completion_log_omits_prompt_and_response(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
