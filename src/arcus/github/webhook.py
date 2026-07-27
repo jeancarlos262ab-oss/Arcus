@@ -20,6 +20,8 @@ class PullRequestEvent:
     action: str
     repo_full_name: str
     pr_number: int
+    pr_title: str
+    author: str
     commit_sha: str
     base_commit_sha: str
     installation_id: int
@@ -69,6 +71,7 @@ def parse_pull_request_event(
     repository = _required_mapping(payload, "repository")
     head = _required_mapping(pull_request, "head")
     base = _required_mapping(pull_request, "base")
+    author = _required_mapping(pull_request, "user")
     installation = _required_mapping(payload, "installation")
 
     repo_full_name = _required_string(repository, "full_name")
@@ -78,6 +81,8 @@ def parse_pull_request_event(
         raise WebhookPayloadError("repository.full_name must be owner/repository")
 
     pr_number = _required_positive_integer(pull_request, "number")
+    pr_title = _required_string(pull_request, "title")
+    author_login = _required_string(author, "login")
     commit_sha = _required_string(head, "sha")
     base_commit_sha = _required_string(base, "sha")
     installation_id = _required_positive_integer(installation, "id")
@@ -86,6 +91,8 @@ def parse_pull_request_event(
         action=action,
         repo_full_name=repo_full_name,
         pr_number=pr_number,
+        pr_title=pr_title,
+        author=author_login,
         commit_sha=commit_sha,
         base_commit_sha=base_commit_sha,
         installation_id=installation_id,

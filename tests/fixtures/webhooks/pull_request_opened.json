@@ -6,6 +6,9 @@
     "title": "Add configurable retry policy",
     "state": "open",
     "html_url": "https://github.com/acme/widgets/pull/42",
+    "user": {
+      "login": "octocat"
+    },
     "head": {
       "ref": "feature/retry-policy",
       "sha": "abc123def4567890"

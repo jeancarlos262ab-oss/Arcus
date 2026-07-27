@@ -164,6 +164,32 @@ export function typeTotals(runs: ReviewRun[]): Record<FindingType, number> {
   return acc;
 }
 
+export interface RepoHealthSummary {
+  repo: string;
+  healthScore: number;
+  totalFindings: number;
+  bySeverity: Record<Severity, number>;
+}
+
+/**
+ * Salud resumida por repo (últimos 30 días), para previsualizaciones donde no
+ * hay espacio para el detalle completo de `computeOverview` (p. ej. el
+ * selector de repos del sidebar).
+ */
+export function repoHealthSummaries(runs: ReviewRun[], repos: string[]): RepoHealthSummary[] {
+  const { range } = rangeFromKey("30d");
+  return repos.map((repo) => {
+    const scoped = filterRuns(runs, repo, range);
+    const bySeverity = severityTotals(scoped);
+    const totalFindings = bySeverity.high + bySeverity.medium + bySeverity.low;
+    const avgFindingsPerPr = scoped.length > 0 ? totalFindings / scoped.length : 0;
+    const densityPenalty = Math.min(avgFindingsPerPr * 6, 55);
+    const highPenalty = Math.min((bySeverity.high / Math.max(scoped.length, 1)) * 14, 25);
+    const healthScore = Math.round(Math.max(0, Math.min(100, 88 - densityPenalty - highPenalty)));
+    return { repo, healthScore, totalFindings, bySeverity };
+  });
+}
+
 /** Fiabilidad por agente: % de corridas donde cada agente terminó en ok. */
 export function agentReliability(runs: ReviewRun[]): { agent: string; ok: number }[] {
   const agents = ["context", "consistency", "bugs", "fixes", "report"] as const;

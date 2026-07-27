@@ -14,14 +14,14 @@
     --ink: 230 237 243;
     --muted: 139 148 158;
     --faint: 110 118 129;
-    --accent: 45 212 191;
-    --accent-hover: 52 231 206;
-    --high: 248 81 73;
-    --medium: 227 160 8;
-    --low: 88 166 255;
-    --success: 63 185 80;
-    --grad-a: rgba(45, 212, 191, 0.07);
-    --grad-b: rgba(88, 166, 255, 0.05);
+    --accent: 139 92 246;
+    --accent-hover: 124 58 237;
+    --high: 244 63 129;
+    --medium: 245 158 11;
+    --low: 99 133 255;
+    --success: 45 191 137;
+    --grad-a: rgba(139, 92, 246, 0.07);
+    --grad-b: rgba(99, 133, 255, 0.05);
   }
 
   /* Tema claro */
@@ -35,14 +35,21 @@
     --ink: 24 31 42;
     --muted: 90 100 114;
     --faint: 130 139 151;
-    --accent: 13 148 136;
-    --accent-hover: 15 118 110;
-    --high: 220 38 38;
-    --medium: 176 108 8;
-    --low: 37 99 235;
-    --success: 22 138 62;
-    --grad-a: rgba(13, 148, 136, 0.06);
-    --grad-b: rgba(37, 99, 235, 0.05);
+    --accent: 124 58 237;
+    --accent-hover: 109 40 217;
+    --high: 219 39 119;
+    --medium: 180 108 8;
+    --low: 67 56 202;
+    --success: 15 148 106;
+    --grad-a: rgba(124, 58, 237, 0.06);
+    --grad-b: rgba(67, 56, 202, 0.05);
+  }
+
+  html {
+    /* Reduce la base de rem (16px -> 14px): así todo lo que usa la escala de
+       espaciado/tipografía de Tailwind (p-5, gap-4, text-3xl, etc.) se
+       encoge de forma proporcional en toda la app sin tocar cada clase. */
+    font-size: 87.5%;
   }
 
   html,
@@ -53,10 +60,6 @@
 
   body {
     @apply bg-bg text-ink font-sans antialiased;
-    background-image:
-      radial-gradient(900px 500px at 12% -8%, var(--grad-a), transparent 60%),
-      radial-gradient(800px 500px at 100% 0%, var(--grad-b), transparent 55%);
-    background-attachment: fixed;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
 
@@ -74,7 +77,7 @@
 
 @layer components {
   .panel {
-    @apply bg-surface border border-border rounded-xl2 shadow-card;
+    @apply bg-surface border border-border rounded-xl2;
   }
 
   .panel-hover {
