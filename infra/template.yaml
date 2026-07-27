@@ -175,6 +175,7 @@ Resources:
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
+      BucketName: !Sub arcus-${Environment}-context-artifacts
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -237,6 +238,7 @@ Resources:
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
+      TableName: !Sub arcus-${Environment}-review-history
       BillingMode: PAY_PER_REQUEST
       OnDemandThroughput:
         MaxReadRequestUnits: !Ref DynamoMaxReadRequestUnits
@@ -269,6 +271,7 @@ Resources:
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
+      Name: !Sub arcus-${Environment}-github-webhook-secret
       Description: Populate the GitHub webhook HMAC secret outside CloudFormation.
 
   GitHubAppPrivateKeySecret:
@@ -276,6 +279,7 @@ Resources:
     DeletionPolicy: RetainExceptOnCreate
     UpdateReplacePolicy: Retain
     Properties:
+      Name: !Sub arcus-${Environment}-github-app-private-key
       Description: Populate the GitHub App PEM private key outside CloudFormation.
 
   DashboardApiKeySecret:
@@ -293,7 +297,8 @@ Resources:
 
   CostAlarmTopic:
     Type: AWS::SNS::Topic
-    Properties: {}
+    Properties:
+      TopicName: !Sub arcus-${Environment}-cost-alarms
 
   CostAlarmEmailSubscription:
     Type: AWS::SNS::Subscription
@@ -308,6 +313,7 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
+      LogGroupName: !Sub /aws/apigateway/arcus-${Environment}-webhook
       RetentionInDays: 14
 
   WebhookHttpApi:
@@ -334,7 +340,10 @@ Resources:
 
   WebhookFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
     Properties:
+      FunctionName: !Sub arcus-${Environment}-webhook
       Description: Verifies and atomically limits GitHub webhook deliveries.
       CodeUri: ../
       Handler: arcus.entrypoints.webhook_handler.lambda_handler
@@ -379,7 +388,10 @@ Resources:
 
   FetchPRFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
     Properties:
+      FunctionName: !Sub arcus-${Environment}-fetch-pr
       Description: Downloads a bounded PR diff and changed-file list.
       CodeUri: ../
       Handler: arcus.entrypoints.fetch_pr.lambda_handler
@@ -442,7 +454,10 @@ Resources:
 
   ContextBuilderFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
     Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-context-builder
       Description: Loads the seeded repository graph and persists bounded PR context.
       CodeUri: ../
       Handler: arcus.agents.context_builder.lambda_handler
@@ -461,7 +476,10 @@ Resources:
 
   ConsistencyCheckerFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
     Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-consistency-checker
       Description: Runs one bounded consistency review model operation.
       CodeUri: ../
       Handler: arcus.agents.consistency_checker.lambda_handler
@@ -483,7 +501,10 @@ Resources:
 
   BugHunterFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
     Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-bug-hunter
       Description: Runs one bounded bug and security review model operation.
       CodeUri: ../
       Handler: arcus.agents.bug_hunter.lambda_handler
@@ -493,7 +514,10 @@ Resources:
 
   FixSuggesterFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
     Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-fix-suggester
       Description: Produces fixes in one bounded batch model operation.
       CodeUri: ../
       Handler: arcus.agents.fix_suggester.lambda_handler
@@ -510,7 +534,10 @@ Resources:
 
   ReporterFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
     Properties:
+      FunctionName: !Sub arcus-${Environment}-agent-reporter
       Description: Upserts one review comment and one idempotent history row.
       CodeUri: ../
       Handler: arcus.agents.reporter.lambda_handler
@@ -689,12 +716,13 @@ Resources:
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
-      LogGroupName: !Sub /aws/vendedlogs/states/${AWS::StackName}-pr-pipeline
+      LogGroupName: !Sub /aws/vendedlogs/states/arcus-${Environment}-pr-pipeline
       RetentionInDays: 14
 
   PipelineStateMachineRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Sub arcus-${Environment}-pr-pipeline-role
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -736,6 +764,7 @@ Resources:
   PipelineStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
+      Name: !Sub arcus-${Environment}-pr-pipeline
       Type: STANDARD
       Role: !GetAtt PipelineStateMachineRole.Arn
       DefinitionUri: statemachine/pipeline.asl.json
