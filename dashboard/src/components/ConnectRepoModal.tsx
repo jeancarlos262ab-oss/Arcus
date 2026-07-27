@@ -17,7 +17,7 @@ interface ConnectRepoModalProps {
  * selector antes de su primera revisión real.
  */
 export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
-  const { addRepo, watchedRepos, removeRepo, disconnectAll } = useStore();
+  const { addRepo, watchedRepos, removeRepo, disconnectAll, availableRepos } = useStore();
   const [newRepo, setNewRepo] = useState("");
   const [repoError, setRepoError] = useState<string | null>(null);
 
@@ -31,6 +31,8 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
       setRepoError(result.error ?? "No se pudo agregar el repositorio.");
     }
   };
+
+  const suggestions = availableRepos.filter((repo) => !watchedRepos.includes(repo));
 
   const handleInstallOnGitHub = () => {
     if (!RUNTIME_CONFIG.githubAppInstallUrl) return;
@@ -80,9 +82,7 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
 
       <div className="my-4 h-px bg-border" />
 
-      <p className="mb-2 text-xs font-semibold text-muted">
-        Agregar a la lista local (mientras no tenga revisiones)
-      </p>
+      <p className="mb-2 text-xs font-semibold text-muted">Ver un repositorio en este navegador</p>
       <form onSubmit={handleAddRepo} className="mb-2 flex gap-2">
         <input
           className="input flex-1"
@@ -100,8 +100,28 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
       </form>
       {repoError && <p className="mb-2 text-xs text-red-500">{repoError}</p>}
 
+      {suggestions.length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1.5 text-[0.72rem] text-faint">
+            Repositorios con revisiones que puedes agregar:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.map((repo) => (
+              <button
+                key={repo}
+                onClick={() => addRepo(repo)}
+                className="focus-ring rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-ink"
+              >
+                {repo}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {watchedRepos.length > 0 && (
         <div className="space-y-1.5">
+          <p className="mb-1.5 text-[0.72rem] text-faint">Tu lista actual:</p>
           {watchedRepos.map((repo) => (
             <div
               key={repo}
@@ -111,8 +131,8 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
               <button
                 onClick={() => removeRepo(repo)}
                 className="focus-ring grid h-6 w-6 place-items-center rounded-md text-faint hover:bg-surface-2 hover:text-ink"
-                aria-label={`Quitar ${repo} de la lista`}
-                title="Quitar de la lista"
+                aria-label={`Quitar ${repo} de tu lista`}
+                title="Quitar de tu lista"
               >
                 <X size={13} />
               </button>
@@ -122,15 +142,15 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
             onClick={disconnectAll}
             className="mt-1 text-[0.72rem] text-faint underline-offset-2 hover:text-ink hover:underline"
           >
-            Desconectar todo
+            Quitar todos
           </button>
         </div>
       )}
 
       <p className="mt-3 text-[0.72rem] text-faint">
-        Este campo solo agrega el nombre a tu lista local del navegador; no instala nada en
-        GitHub. Los repos con revisiones reales aparecen automáticamente en cuanto el pipeline
-        procese su primer PR.
+        Esta lista es solo tuya, guardada en este navegador; no afecta lo que ven otras
+        personas ni instala nada en GitHub. El repositorio debe tener la GitHub App instalada
+        y al menos un Pull Request procesado para mostrar datos.
       </p>
     </Modal>
   );

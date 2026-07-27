@@ -37,7 +37,6 @@ const INITIAL_STATE: StoreState = {
 };
 
 const WATCHLIST_KEY = "arcus.watchedRepos.v1";
-const HIDDEN_REPOS_KEY = "arcus.hiddenRepos.v1";
 const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
 
 function loadStringList(key: string): string[] {
@@ -56,10 +55,11 @@ function saveStringList(key: string, values: string[]): void {
 }
 
 /**
- * Repos "vigilados" agregados manualmente desde Ajustes, guardados en el
- * navegador. Permiten preparar un repositorio en el dashboard antes de que
- * el pipeline registre su primera revisión real; no sustituyen los datos
- * reales, solo amplían qué aparece en el selector mientras llegan.
+ * Repos elegidos explícitamente por quien usa este navegador, guardados
+ * localmente. El backend puede tener historial de muchos repos compartidos
+ * entre todo el equipo; el dashboard nunca los muestra automáticamente,
+ * cada persona elige los suyos aquí. Vacío por defecto: nada aparece hasta
+ * que el usuario agrega un repo.
  */
 function loadWatchlist(): string[] {
   return loadStringList(WATCHLIST_KEY);
@@ -67,19 +67,6 @@ function loadWatchlist(): string[] {
 
 function saveWatchlist(repos: string[]): void {
   saveStringList(WATCHLIST_KEY, repos);
-}
-
-/**
- * Repos con historial real que el usuario ocultó individualmente (o vía
- * "Desconectar todo"). Es una preferencia local por repo, no un interruptor
- * global: agregar OTRO repo nunca revive uno que ya se ocultó a propósito.
- */
-function loadHiddenRepos(): string[] {
-  return loadStringList(HIDDEN_REPOS_KEY);
-}
-
-function saveHiddenRepos(repos: string[]): void {
-  saveStringList(HIDDEN_REPOS_KEY, repos);
 }
 
 interface StoreContextValue {
@@ -95,22 +82,24 @@ interface StoreContextValue {
   getFindings: (runId: string) => Finding[];
   /** Vuelve a cargar repos y revisiones desde la API real. */
   refresh: () => void;
-  /** Agrega un repo a la watchlist local (owner/repo). No crea datos falsos. */
+  /**
+   * Elige un repo para verlo en este navegador (owner/repo). No crea datos
+   * falsos: solo agrega el nombre a tu lista local, con o sin historial real
+   * todavía.
+   */
   addRepo: (fullName: string) => { ok: boolean; error?: string };
-  /**
-   * Quita un repo de la vista: si es de la watchlist local lo borra; si es un
-   * repo real con historial, lo oculta individualmente (no borra nada en
-   * DynamoDB/S3). Nunca reaparece solo por agregar otro repo distinto.
-   */
+  /** Quita un repo de tu lista local. No borra nada en DynamoDB/S3. */
   removeRepo: (fullName: string) => void;
-  /**
-   * Desconecta todo: oculta cada repo visible ahora mismo (real o local) y
-   * deja el dashboard como recién instalado. No borra historial en
-   * DynamoDB/S3 ni desinstala la GitHub App.
-   */
+  /** Vacía tu lista local por completo: el dashboard queda como recién instalado. */
   disconnectAll: () => void;
-  /** Repos agregados manualmente que aún no tienen historial real. */
+  /** Repos que tu lista local incluye. Puede tener 0, 1 o más elementos. */
   watchedRepos: string[];
+  /**
+   * Todo repo con al menos una revisión real en el backend compartido,
+   * independientemente de quién lo agregó. Se usa solo como catálogo para
+   * elegir (p. ej. en el modal de conectar); nunca se muestra directamente.
+   */
+  availableRepos: string[];
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -123,7 +112,6 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StoreState>(INITIAL_STATE);
   const [watchlist, setWatchlist] = useState<string[]>(loadWatchlist);
-  const [hiddenRepos, setHiddenRepos] = useState<string[]>(loadHiddenRepos);
   const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [rangeKey, setRangeKey] = useState<RangeKey>("90d");
   const [reloadToken, setReloadToken] = useState(0);
@@ -134,15 +122,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async function load() {
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
+        // El catálogo completo (qué repos tienen historial en el backend
+        // compartido) solo sirve para elegir; nunca se muestra directamente.
         const apiRepos = await fetchRepos();
-        if (apiRepos.length === 0) {
+        const reposToLoad = watchlist.filter((repo) => apiRepos.includes(repo));
+
+        if (reposToLoad.length === 0) {
           if (!cancelled) {
-            setState({ loading: false, error: null, apiRepos: [], runs: [], findingsByRun: {} });
+            setState({ loading: false, error: null, apiRepos, runs: [], findingsByRun: {} });
           }
           return;
         }
 
-        const reviewsByRepo = await Promise.all(apiRepos.map((repo) => fetchReviews(repo)));
+        const reviewsByRepo = await Promise.all(reposToLoad.map((repo) => fetchReviews(repo)));
         const runs: ReviewRun[] = [];
         const findingsByRun: Record<string, Finding[]> = {};
         for (const reviews of reviewsByRepo) {
@@ -172,15 +164,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [reloadToken]);
+  }, [reloadToken, watchlist]);
 
-  // Repos visibles = los que ya tienen historial real + los vigilados manualmente,
-  // menos los que el usuario ocultó individualmente (por repo, no global).
-  const repos = useMemo(() => {
-    const merged = new Set([...state.apiRepos, ...watchlist]);
-    for (const hidden of hiddenRepos) merged.delete(hidden);
-    return [...merged].sort();
-  }, [state.apiRepos, watchlist, hiddenRepos]);
+  // Repos visibles = únicamente los que el usuario eligió en este navegador.
+  // Nunca se muestra automáticamente el catálogo completo del backend.
+  const repos = useMemo(() => [...watchlist].sort(), [watchlist]);
 
   // Mantén un repo válido seleccionado en cuanto la lista combinada esté lista.
   useEffect(() => {
@@ -204,28 +192,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!REPO_PATTERN.test(name)) {
         return { ok: false, error: "Formato inválido. Usa owner/repo." };
       }
-      if (repos.includes(name)) {
-        return { ok: false, error: "El repositorio ya está en la lista." };
+      if (watchlist.includes(name)) {
+        return { ok: false, error: "El repositorio ya está en tu lista." };
       }
-      // Agregar un repo que estaba oculto es un acto de reconexión explícito
-      // para ESE repo puntual; no afecta a ningún otro repo oculto.
-      setHiddenRepos((current) => {
-        if (!current.includes(name)) return current;
-        const next = current.filter((r) => r !== name);
-        saveHiddenRepos(next);
+      setWatchlist((current) => {
+        const next = [...current, name];
+        saveWatchlist(next);
         return next;
       });
-      if (!state.apiRepos.includes(name)) {
-        setWatchlist((current) => {
-          if (current.includes(name)) return current;
-          const next = [...current, name];
-          saveWatchlist(next);
-          return next;
-        });
-      }
       return { ok: true };
     },
-    [repos, state.apiRepos],
+    [watchlist],
   );
 
   const removeRepo = useCallback((fullName: string) => {
@@ -235,31 +212,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       saveWatchlist(next);
       return next;
     });
-    // Si además tiene historial real, ocúltalo individualmente; agregar otro
-    // repo distinto nunca lo va a revivir por accidente.
-    setHiddenRepos((current) => {
-      if (current.includes(fullName)) return current;
-      const next = [...current, fullName];
-      saveHiddenRepos(next);
-      return next;
-    });
   }, []);
 
-  /**
-   * Oculta cada repo visible ahora mismo (real u observado localmente) y
-   * vacía la watchlist. No toca DynamoDB/S3 ni la instalación de la GitHub
-   * App en GitHub; cada repo puede volver a agregarse individualmente.
-   */
+  /** Vacía la lista local por completo: el dashboard queda como recién instalado. */
   const disconnectAll = useCallback(() => {
     setWatchlist([]);
     saveWatchlist([]);
-    setHiddenRepos((current) => {
-      const next = [...new Set([...current, ...repos])];
-      saveHiddenRepos(next);
-      return next;
-    });
     setSelectedRepo("");
-  }, [repos]);
+  }, []);
 
   const settings = useMemo<DisplaySettings>(
     () => ({ region: RUNTIME_CONFIG.region, modelId: RUNTIME_CONFIG.modelId }),
@@ -283,6 +243,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removeRepo,
       disconnectAll,
       watchedRepos: watchlist,
+      availableRepos: state.apiRepos,
     }),
     [
       state.loading,
@@ -298,6 +259,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       removeRepo,
       disconnectAll,
       watchlist,
+      state.apiRepos,
     ],
   );
 
