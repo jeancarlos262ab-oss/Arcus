@@ -49,7 +49,7 @@ Parameters:
     MinValue: 1
   MaxOutputTokens:
     Type: Number
-    Default: 1200
+    Default: 2400
     MinValue: 1
   MaxPromptBytes:
     Type: Number
