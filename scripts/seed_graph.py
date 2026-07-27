@@ -1,4 +1,4 @@
-"""Build and upload the canonical graph consumed by Context Builder."""
+"""Operator recovery tool for rebuilding a repository graph artifact."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 
 from arcus.graph import GraphBuilder
+from arcus.graph.keys import repository_graph_key, repository_graph_pointer_key
 from arcus.storage.artifacts import S3ArtifactStore
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ def seed_graph(
     graph_version: str,
     bucket_name: str,
 ) -> str:
-    """Build one Python repository graph and persist its stable main reference.
+    """Build one graph and persist the immutable base-commit recovery artifact.
 
     Args:
         repository_path: Local checkout root to parse.
@@ -27,7 +28,7 @@ def seed_graph(
         bucket_name: Deployed context-artifacts bucket.
 
     Returns:
-        S3 URI consumed by Context Builder.
+        S3 URI for the immutable graph consumed by Context Builder.
     """
 
     graph = GraphBuilder(
@@ -35,9 +36,15 @@ def seed_graph(
         graph_version,
         root_path=repository_path,
     ).parse_directory(repository_path)
-    reference = S3ArtifactStore(bucket_name).put_json(
-        f"graphs/{repo_full_name}/main.json",
-        graph.model_dump(mode="json"),
+    artifact_store = S3ArtifactStore(bucket_name)
+    graph_payload = graph.model_dump(mode="json")
+    reference = artifact_store.put_json(
+        repository_graph_key(repo_full_name, graph_version),
+        graph_payload,
+    )
+    artifact_store.put_json(
+        repository_graph_pointer_key(repo_full_name),
+        graph_payload,
     )
     logger.info(
         "repository_graph_seeded",
@@ -53,7 +60,7 @@ def seed_graph(
 
 
 def main() -> int:
-    """Parse CLI values and seed one graph into a configured dev/demo bucket."""
+    """Parse CLI values and recover one graph in a configured artifact bucket."""
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("repository_path", type=Path)

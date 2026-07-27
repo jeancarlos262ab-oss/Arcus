@@ -49,7 +49,7 @@ Parameters:
     MinValue: 1
   MaxOutputTokens:
     Type: Number
-    Default: 1200
+    Default: 2400
     MinValue: 1
   MaxPromptBytes:
     Type: Number
@@ -74,6 +74,26 @@ Parameters:
     Type: Number
     Default: 524288
     MinValue: 1
+  MaxRepositoryArchiveBytes:
+    Type: Number
+    Default: 20971520
+    MinValue: 1
+    MaxValue: 52428800
+  MaxRepositoryExtractedBytes:
+    Type: Number
+    Default: 104857600
+    MinValue: 1
+    MaxValue: 536870912
+  MaxRepositoryFiles:
+    Type: Number
+    Default: 5000
+    MinValue: 1
+    MaxValue: 20000
+  MaxGraphBytes:
+    Type: Number
+    Default: 5242880
+    MinValue: 1
+    MaxValue: 20971520
   MaxEnvelopeBytes:
     Type: Number
     Default: 240000
@@ -138,6 +158,10 @@ Globals:
         MAX_FINDINGS_TOTAL: !Ref MaxFindingsTotal
         MAX_CHANGED_FILES: !Ref MaxChangedFiles
         MAX_DIFF_BYTES: !Ref MaxDiffBytes
+        MAX_REPOSITORY_ARCHIVE_BYTES: !Ref MaxRepositoryArchiveBytes
+        MAX_REPOSITORY_EXTRACTED_BYTES: !Ref MaxRepositoryExtractedBytes
+        MAX_REPOSITORY_FILES: !Ref MaxRepositoryFiles
+        MAX_GRAPH_BYTES: !Ref MaxGraphBytes
         MAX_ENVELOPE_BYTES: !Ref MaxEnvelopeBytes
         MAX_AI_OPERATIONS_PER_RUN: !Ref MaxAiOperationsPerRun
     Tags:
@@ -254,6 +278,19 @@ Resources:
     Properties:
       Description: Populate the GitHub App PEM private key outside CloudFormation.
 
+  DashboardApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub arcus-${Environment}-dashboard-api-key
+      Description: Populate the shared API key required by the read-only dashboard API.
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: api_key
+        ExcludePunctuation: true
+        PasswordLength: 40
+
   CostAlarmTopic:
     Type: AWS::SNS::Topic
     Properties: {}
@@ -364,6 +401,45 @@ Resources:
               Action: s3:PutObject
               Resource: !Sub ${ContextArtifactsBucket.Arn}/prs/*
 
+  EnsureRepositoryGraphFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-ensure-repository-graph
+      Description: Lazily builds one bounded immutable graph for the PR base commit.
+      CodeUri: ../
+      Handler: arcus.entrypoints.ensure_repository_graph.lambda_handler
+      Timeout: 90
+      MemorySize: 1024
+      EphemeralStorage:
+        Size: 1024
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref GitHubAppId
+          GITHUB_APP_PRIVATE_KEY_SECRET_ARN: !Ref GitHubAppPrivateKeySecret
+          GITHUB_API_BASE_URL: https://api.github.com
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadGitHubPrivateKey
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref GitHubAppPrivateKeySecret
+            - Sid: ReadWriteVersionedRepositoryGraphs
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub ${ContextArtifactsBucket.Arn}/graphs/*
+            - Sid: CheckVersionedRepositoryGraphPresence
+              Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ContextArtifactsBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: graphs/*
+
   ContextBuilderFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -456,6 +532,86 @@ Resources:
               Action: dynamodb:PutItem
               Resource: !GetAtt ReviewHistoryTable.Arn
 
+  DashboardApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/arcus-${Environment}-dashboard
+      RetentionInDays: 14
+
+  DashboardHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Public read-only API for the Arcus dashboard SPA, protected by an API key.
+      StageName: "$default"
+      FailOnWarnings: true
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: [GET]
+        AllowHeaders: [x-api-key, content-type]
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
+      AccessLogSettings:
+        DestinationArn: !GetAtt DashboardApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","requestTime":"$context.requestTime",
+          "httpMethod":"$context.httpMethod","routeKey":"$context.routeKey",
+          "status":"$context.status","responseLength":"$context.responseLength"}
+      Tags:
+        Project: Arcus
+        Environment: !Ref Environment
+        ManagedBy: SAM
+
+  DashboardApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-dashboard-api
+      Description: Serves read-only repository, review, and graph data to the dashboard SPA.
+      CodeUri: ../
+      Handler: arcus.entrypoints.dashboard_api.lambda_handler
+      Timeout: 10
+      Environment:
+        Variables:
+          DASHBOARD_API_KEY_SECRET_ARN: !Ref DashboardApiKeySecret
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadDashboardApiKey
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref DashboardApiKeySecret
+            - Sid: ReadReviewHistory
+              Effect: Allow
+              Action: dynamodb:Query
+              Resource: !GetAtt ReviewHistoryTable.Arn
+            - Sid: ReadGraphArtifacts
+              Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${ContextArtifactsBucket.Arn}/graphs/*
+      Events:
+        Repos:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /repos
+            Method: GET
+        Reviews:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /reviews
+            Method: GET
+        Graph:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /graph
+            Method: GET
+
   WebhookFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
@@ -470,6 +626,14 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       LogGroupName: !Sub /aws/lambda/${FetchPRFunction}
+      RetentionInDays: 14
+
+  EnsureRepositoryGraphLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${EnsureRepositoryGraphFunction}
       RetentionInDays: 14
 
   ContextBuilderLogGroup:
@@ -512,6 +676,14 @@ Resources:
       LogGroupName: !Sub /aws/lambda/${ReporterFunction}
       RetentionInDays: 14
 
+  DashboardApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${DashboardApiFunction}
+      RetentionInDays: 14
+
   PipelineLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
@@ -539,6 +711,7 @@ Resources:
                 Action: lambda:InvokeFunction
                 Resource:
                   - !GetAtt FetchPRFunction.Arn
+                  - !GetAtt EnsureRepositoryGraphFunction.Arn
                   - !GetAtt ContextBuilderFunction.Arn
                   - !GetAtt ConsistencyCheckerFunction.Arn
                   - !GetAtt BugHunterFunction.Arn
@@ -568,6 +741,7 @@ Resources:
       DefinitionUri: statemachine/pipeline.asl.json
       DefinitionSubstitutions:
         FetchPRFunctionArn: !GetAtt FetchPRFunction.Arn
+        EnsureRepositoryGraphFunctionArn: !GetAtt EnsureRepositoryGraphFunction.Arn
         ContextBuilderFunctionArn: !GetAtt ContextBuilderFunction.Arn
         ConsistencyCheckerFunctionArn: !GetAtt ConsistencyCheckerFunction.Arn
         BugHunterFunctionArn: !GetAtt BugHunterFunction.Arn
@@ -719,6 +893,8 @@ Outputs:
     Value: !Ref CostAlarmTopic
   FetchPRFunctionArn:
     Value: !GetAtt FetchPRFunction.Arn
+  EnsureRepositoryGraphFunctionArn:
+    Value: !GetAtt EnsureRepositoryGraphFunction.Arn
   ContextBuilderFunctionArn:
     Value: !GetAtt ContextBuilderFunction.Arn
   ConsistencyCheckerFunctionArn:
@@ -729,3 +905,11 @@ Outputs:
     Value: !GetAtt FixSuggesterFunction.Arn
   ReporterFunctionArn:
     Value: !GetAtt ReporterFunction.Arn
+  DashboardApiId:
+    Value: !Ref DashboardHttpApi
+  DashboardApiUrl:
+    Value: !Sub https://${DashboardHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  DashboardApiKeySecretArn:
+    Value: !Ref DashboardApiKeySecret
+  DashboardApiFunctionArn:
+    Value: !GetAtt DashboardApiFunction.Arn

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
@@ -46,7 +47,7 @@ def test_invoke_model_uses_configured_model_and_extracts_text() -> None:
     runtime_client.converse.assert_called_once_with(
         modelId="configured-model",
         messages=[{"role": "user", "content": [{"text": "Review this diff"}]}],
-        inferenceConfig={"maxTokens": 1200, "temperature": 0.0},
+        inferenceConfig={"maxTokens": 2400, "temperature": 0.0},
     )
 
 
@@ -256,11 +257,85 @@ def test_malformed_converse_envelope_is_rejected() -> None:
         extract_text({"output": {}})
 
 
+def test_max_token_completion_is_reported_before_json_parsing() -> None:
+    """A truncated completion should expose its provider stop reason."""
+
+    runtime_client = Mock()
+    response = _load_fixture("bug_hunter_response.json")
+    response["stopReason"] = "max_tokens"
+    runtime_client.converse.return_value = response
+    client = BedrockClient(runtime_client=runtime_client)
+
+    with pytest.raises(BedrockResponseError, match="max output token"):
+        client.invoke_model("Review this diff")
+
+
+def test_json_object_surrounded_by_model_prose_is_recovered() -> None:
+    """A complete JSON object remains usable when the model adds short prose."""
+
+    findings = parse_findings('Here is the result:\n{"findings": []}\nDone.')
+
+    assert findings == []
+
+
 def test_valid_json_that_violates_finding_contract_is_rejected() -> None:
     """Syntactically valid generated JSON still must pass the Pydantic contract."""
 
     with pytest.raises(BedrockResponseError, match="contract validation"):
         parse_findings('{"findings": [{"unexpected": true}]}')
+
+
+def test_model_finding_label_is_normalized_to_a_deterministic_uuid() -> None:
+    """Finding identity must not depend on the model emitting UUID syntax."""
+
+    finding = {
+        "id": "finding-1",
+        "agent": "bug_hunter",
+        "type": "logic_bug",
+        "severity": "high",
+        "file": "src/a.py",
+        "line_start": 1,
+        "line_end": 1,
+        "title": "Bug",
+        "rationale": "Reason",
+        "evidence_refs": [],
+        "fix": None,
+    }
+    response = json.dumps({"findings": [finding]})
+
+    first = parse_findings(response)
+    second = parse_findings(response)
+
+    assert isinstance(first[0].id, UUID)
+    assert first[0].id == second[0].id
+    assert str(first[0].id) != "finding-1"
+
+
+def test_finding_validation_error_reports_safe_bounded_details() -> None:
+    """Contract diagnostics identify fields without exposing generated values."""
+
+    private_value = "PRIVATE MODEL OUTPUT"
+    finding = {
+        "id": "323e4567-e89b-42d3-a456-426614174002",
+        "agent": private_value,
+        "type": "logic_bug",
+        "severity": "high",
+        "file": "src/a.py",
+        "line_start": 1,
+        "line_end": 1,
+        "title": "Bug",
+        "rationale": "Reason",
+        "evidence_refs": [],
+        "fix": None,
+    }
+
+    with pytest.raises(BedrockResponseError) as raised:
+        parse_findings(json.dumps({"findings": [finding]}))
+
+    message = str(raised.value)
+    assert "findings[0].agent" in message
+    assert "enum" in message
+    assert private_value not in message
 
 
 def test_completion_log_omits_prompt_and_response(

@@ -9,8 +9,8 @@ The stack provisions:
 - A private, encrypted, versioned S3 artifact bucket. PR artifacts expire after `ArtifactRetentionDays`; noncurrent PR and graph versions expire after `NoncurrentVersionRetentionDays`.
 - An encrypted, on-demand DynamoDB table with TTL and maximum on-demand read/write units.
 - A public API Gateway HTTP API exposing only `POST /webhook`, with a low route throttle.
-- The webhook, Fetch PR, Context Builder, Consistency Checker, Bug Hunter, Fix Suggester, and Reporter Lambdas with timeout limits. Admission quotas and the account-level Lambda quota bound hackathon concurrency without per-function reservations.
-- A Standard Step Functions workflow with a ten-minute execution timeout, per-task timeouts, and one retry only for Lambda infrastructure errors.
+- The webhook, Fetch PR, Ensure Repository Graph, Context Builder, Consistency Checker, Bug Hunter, Fix Suggester, and Reporter Lambdas with timeout limits. Admission quotas and the account-level Lambda quota bound hackathon concurrency without per-function reservations.
+- A Standard Step Functions workflow with a twelve-minute execution timeout, per-task timeouts, and one retry only for Lambda infrastructure errors.
 - Secrets Manager containers for the webhook HMAC secret and GitHub App private key.
 - An SNS topic and CloudWatch alarms for webhook volume/throttling, pipeline starts/failures, Bedrock calls/output tokens, and DynamoDB throttling.
 
@@ -25,7 +25,7 @@ Install and configure:
 - AWS CLI
 - AWS SAM CLI with `python-uv` beta-feature support
 - AWS credentials authorized to create the stack, including named IAM roles
-- A GitHub App with pull-request read and issue-comment read/write access
+- A GitHub App with repository contents read, pull-request read, and issue-comment read/write access
 - Bedrock model access in `us-east-1`
 
 Confirm the target account and region before deployment:
@@ -56,7 +56,7 @@ Copy-Item infra/samconfig.toml.example infra/samconfig.toml
 `AllowedRepositories=*` plus `AllowedInstallationIds=*` trusts every installation of the configured App. Before changing the App to public, replace the installation wildcard with approved IDs and redeploy. Per-installation quotas do not provide an aggregate cost ceiling when an unbounded number of public installations can be created.
 - `AlarmNotificationEmail`: optional alarm recipient. Confirm the SNS subscription email after deployment.
 
-The template also exposes limits for webhook bytes, secret-cache TTL, AI operations, output tokens, prompt bytes, findings, changed files, diff bytes, envelope bytes, API throttle, artifact retention, and DynamoDB request units. Keep the defaults unless the demo needs a measured adjustment. Never place secret values, private keys, or credentials in SAM configuration.
+The template also exposes limits for webhook bytes, secret-cache TTL, AI operations, output tokens, prompt bytes, findings, changed files, diff bytes, repository archive bytes, extracted repository bytes, archive entries, graph bytes, envelope bytes, API throttle, artifact retention, and DynamoDB request units. Keep the defaults unless the demo needs a measured adjustment. Never place secret values, private keys, or credentials in SAM configuration.
 
 Synchronize the locked environment:
 
@@ -153,22 +153,11 @@ In the GitHub App settings:
 
 The handler starts reviews for `opened` and `synchronize`. Valid but irrelevant, disallowed, duplicate, or quota-exhausted deliveries receive `202` so GitHub does not amplify cost through redelivery. Invalid signatures are rejected.
 
-## Seed repository context and replay a webhook
+## Automatic repository context and replay a webhook
 
-Seed the graph after deployment and before the first review. Use the base commit checked out locally so Context Builder can report the graph version accurately:
+Repository graph creation is automatic. On the first accepted PR for a base commit, Ensure Repository Graph downloads a bounded GitHub archive using the installation token, safely extracts Python source into Lambda temporary storage, and writes an immutable graph under `graphs/{owner}/{repo}/commits/{base_sha}.json`. Later PRs with the same base commit reuse that object. If bootstrap fails or a repository exceeds a configured limit, the analysis stages are skipped and Reporter publishes the structured failure.
 
-```powershell
-$artifactBucket = aws cloudformation describe-stacks `
-  --stack-name $stackName `
-  --query "Stacks[0].Outputs[?OutputKey=='ContextArtifactsBucketName'].OutputValue | [0]" `
-  --output text
-
-uv run python scripts/seed_graph.py `
-  C:\path\to\repository `
-  owner/repository `
-  "BASE_COMMIT_SHA" `
-  $artifactBucket
-```
+`scripts/seed_graph.py` remains available only as an operator recovery tool. Normal repository onboarding must not require a local clone or manual graph upload.
 
 For the scripted demo rehearsal, load the same webhook secret stored in Secrets Manager and replay the shared signed payload against the deployed endpoint:
 
@@ -200,7 +189,7 @@ After configuring the App and secrets, redeliver an allowed `opened` or `synchro
 1. GitHub receives HTTP `202`.
 2. DynamoDB atomically records delivery/commit claims and both quota counters.
 3. Step Functions starts one execution.
-4. Fetch PR stores a bounded diff; the agents return valid envelopes.
+4. Fetch PR stores a bounded diff; Ensure Repository Graph creates or reuses the base-commit graph; the agents return valid envelopes.
 5. Reporter upserts one marked GitHub comment and one deterministic history row.
 6. Replaying the same delivery or repository/PR/commit does not create another logical run.
 
@@ -270,6 +259,7 @@ The retained bucket, table, and secrets may continue to incur charges and can ca
 - **Webhook returns `401`:** ensure GitHub and Secrets Manager use exactly the same HMAC secret.
 - **Webhook returns `202` without an execution:** check repository/installation allowlists, quota counters, action, and duplicate claims.
 - **No review comment appears:** inspect Reporter logs and verify GitHub App issue-comment permissions.
+- **Graph bootstrap fails:** inspect Ensure Repository Graph logs, GitHub App contents permission, archive limits, and `graphs/{owner}/{repo}/commits/{base_sha}.json` in S3. Analysis is skipped until graph context is available. Use `scripts/seed_graph.py` only for emergency recovery.
 - **Bedrock access denied:** verify model access, region, model ID, and the least-privilege model ARNs in `infra/template.yaml`.
 - **Resource already exists:** locate the owner stack or retained resource; CloudFormation does not adopt it automatically.
 - **S3 bucket name unavailable:** bucket names are global; change the naming strategy instead of creating an unmanaged bucket.

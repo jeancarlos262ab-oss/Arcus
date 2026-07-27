@@ -19,8 +19,10 @@ from arcus.agents.reporter import ReporterAgent
 from arcus.bedrock.client import BedrockClient
 from arcus.config import Settings
 from arcus.contracts import AgentStatus, PipelineEnvelope
+from arcus.entrypoints.ensure_repository_graph import EnsureRepositoryGraphHandler
 from arcus.entrypoints.fetch_pr import FetchPRHandler
 from arcus.github.api import GitHubClient, PullRequestData
+from arcus.graph.bootstrap import GraphBootstrapResult, RepositoryGraphBootstrapper
 from arcus.storage.artifacts import S3ArtifactStore
 from arcus.storage.history import ReviewHistoryStore
 
@@ -157,6 +159,32 @@ def test_fetch_pr_produces_a_valid_bounded_envelope() -> None:
     assert envelope.pr.changed_files == ["src/config.py", "tests/test_config.py"]
     assert envelope.pr.diff_ref is not None
     assert len(json.dumps(output).encode()) < _settings().max_envelope_bytes
+
+
+@pytest.mark.contract
+def test_ensure_repository_graph_preserves_a_valid_envelope() -> None:
+    bootstrapper = Mock(spec=RepositoryGraphBootstrapper)
+    bootstrapper.ensure.return_value = GraphBootstrapResult(
+        graph_ref=(
+            "s3://arcus-dev-context-artifacts/graphs/acme/widgets/"
+            "commits/def456abc1237890.json"
+        ),
+        graph_version="def456abc1237890",
+        cache_hit=False,
+        node_count=3,
+        link_count=2,
+    )
+    handler = EnsureRepositoryGraphHandler(bootstrapper, _settings())
+
+    output = handler.run(_envelope("initial.json"))
+    envelope = PipelineEnvelope.model_validate(output)
+
+    assert envelope.context.status is AgentStatus.PENDING
+    bootstrapper.ensure.assert_called_once_with(
+        "acme/widgets",
+        "def456abc1237890",
+        123456,
+    )
 
 
 @pytest.mark.contract

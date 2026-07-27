@@ -8,212 +8,144 @@ import {
   type ReactNode,
 } from "react";
 
-import { generateDataset, REPOS } from "@/lib/mockData";
+import { ApiConfigError, ApiRequestError, fetchRepos, fetchReviews } from "@/lib/api";
 import { RUNTIME_CONFIG } from "@/lib/runtimeConfig";
-import { simulateReview, type LogLine, type NewReviewInput } from "@/lib/simulate";
-import type { Finding, ReviewRun, Severity } from "@/lib/types";
+import type { Finding, ReviewRun } from "@/lib/types";
 
 export type RangeKey = "30d" | "60d" | "90d";
 
-export interface Settings {
-  autoComment: boolean;
-  minSeverityToComment: Severity;
+interface DisplaySettings {
   region: string;
   modelId: string;
-  githubAppId: string;
-  webhookConfigured: boolean;
 }
 
-const DEFAULT_SETTINGS: Settings = {
-  autoComment: true,
-  minSeverityToComment: "low",
-  region: RUNTIME_CONFIG.region,
-  modelId: RUNTIME_CONFIG.modelId,
-  githubAppId: "",
-  webhookConfigured: false,
-};
-
-interface PersistShape {
+interface StoreState {
+  loading: boolean;
+  error: string | null;
   repos: string[];
   runs: ReviewRun[];
   findingsByRun: Record<string, Finding[]>;
-  settings: Settings;
 }
 
-const STORAGE_KEY = "arcus.store.v1";
-
-/**
- * Normaliza settings cargadas de localStorage: la región, el modelo, el
- * App ID de GitHub y el estado del webhook son propiedad del backend
- * desplegado, nunca del navegador, así que siempre se fuerzan al valor
- * actual en vez de leerse de un guardado previo.
- */
-function normalizeSettings(settings: Partial<Settings> | undefined): Settings {
-  return {
-    ...DEFAULT_SETTINGS,
-    ...settings,
-    region: RUNTIME_CONFIG.region,
-    modelId: RUNTIME_CONFIG.modelId,
-    githubAppId: DEFAULT_SETTINGS.githubAppId,
-    webhookConfigured: DEFAULT_SETTINGS.webhookConfigured,
-  };
-}
-
-function loadInitial(): PersistShape {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as PersistShape;
-      if (parsed.runs && parsed.repos) {
-        return { ...parsed, settings: normalizeSettings(parsed.settings) };
-      }
-    }
-  } catch {
-    // Ignora datos corruptos y re-siembra.
-  }
-  const ds = generateDataset();
-  return {
-    repos: [...REPOS],
-    runs: ds.runs,
-    findingsByRun: ds.findingsByRun,
-    settings: DEFAULT_SETTINGS,
-  };
-}
+const INITIAL_STATE: StoreState = {
+  loading: true,
+  error: null,
+  repos: [],
+  runs: [],
+  findingsByRun: {},
+};
 
 interface StoreContextValue {
+  loading: boolean;
+  error: string | null;
   repos: string[];
   runs: ReviewRun[];
-  settings: Settings;
+  settings: DisplaySettings;
   selectedRepo: string;
   rangeKey: RangeKey;
   setSelectedRepo: (repo: string) => void;
   setRangeKey: (key: RangeKey) => void;
   getFindings: (runId: string) => Finding[];
-  addRepo: (fullName: string) => { ok: boolean; error?: string };
-  removeRepo: (fullName: string) => void;
-  updateSettings: (patch: Partial<Settings>) => void;
-  /** Ejecuta una revisión simulada, emitiendo logs; agrega el run al store. */
-  runReview: (
-    input: NewReviewInput,
-    emit: (line: LogLine) => void,
-    signal?: AbortSignal,
-  ) => Promise<ReviewRun>;
-  resetData: () => void;
+  /** Vuelve a cargar repos y revisiones desde la API real. */
+  refresh: () => void;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
 
+/**
+ * Carga y expone datos reales del backend de Arcus (DynamoDB vía la API de
+ * solo lectura). No hay generación local ni simulación: si la API falla, el
+ * estado queda en `error` y la UI lo muestra explícitamente.
+ */
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<PersistShape>(loadInitial);
-  const [selectedRepo, setSelectedRepo] = useState<string>(() => state.repos[0] ?? "");
+  const [state, setState] = useState<StoreState>(INITIAL_STATE);
+  const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [rangeKey, setRangeKey] = useState<RangeKey>("90d");
+  const [reloadToken, setReloadToken] = useState(0);
 
-  // Persistencia
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    let cancelled = false;
 
-  // Mantén un repo válido seleccionado.
-  useEffect(() => {
-    if (!state.repos.includes(selectedRepo) && state.repos.length > 0) {
-      setSelectedRepo(state.repos[0]);
+    async function load() {
+      setState((s) => ({ ...s, loading: true, error: null }));
+      try {
+        const repos = await fetchRepos();
+        if (repos.length === 0) {
+          if (!cancelled) {
+            setState({ loading: false, error: null, repos: [], runs: [], findingsByRun: {} });
+          }
+          return;
+        }
+
+        const reviewsByRepo = await Promise.all(repos.map((repo) => fetchReviews(repo)));
+        const runs: ReviewRun[] = [];
+        const findingsByRun: Record<string, Finding[]> = {};
+        for (const reviews of reviewsByRepo) {
+          for (const { findings, ...run } of reviews) {
+            runs.push(run);
+            findingsByRun[run.pipeline_run_id] = findings;
+          }
+        }
+        runs.sort((a, b) => a.created_at.localeCompare(b.created_at));
+
+        if (!cancelled) {
+          setState({ loading: false, error: null, repos, runs, findingsByRun });
+          setSelectedRepo((current) => (repos.includes(current) ? current : repos[0]));
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const message =
+          err instanceof ApiConfigError
+            ? err.message
+            : err instanceof ApiRequestError
+              ? err.message
+              : "No se pudo cargar la información del backend de Arcus.";
+        setState((s) => ({ ...s, loading: false, error: message }));
+      }
     }
-  }, [state.repos, selectedRepo]);
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
 
   const getFindings = useCallback(
     (runId: string) => state.findingsByRun[runId] ?? [],
     [state.findingsByRun],
   );
 
-  const addRepo = useCallback((fullName: string) => {
-    const name = fullName.trim();
-    if (!/^[\w.-]+\/[\w.-]+$/.test(name)) {
-      return { ok: false, error: "Formato inválido. Usa owner/repo." };
-    }
-    let duplicated = false;
-    setState((s) => {
-      if (s.repos.includes(name)) {
-        duplicated = true;
-        return s;
-      }
-      return { ...s, repos: [...s.repos, name] };
-    });
-    return duplicated ? { ok: false, error: "El repositorio ya existe." } : { ok: true };
-  }, []);
+  const refresh = useCallback(() => setReloadToken((t) => t + 1), []);
 
-  const removeRepo = useCallback((fullName: string) => {
-    setState((s) => {
-      const runsToDrop = new Set(
-        s.runs.filter((r) => r.repo_full_name === fullName).map((r) => r.pipeline_run_id),
-      );
-      const findingsByRun = { ...s.findingsByRun };
-      for (const id of runsToDrop) delete findingsByRun[id];
-      return {
-        ...s,
-        repos: s.repos.filter((r) => r !== fullName),
-        runs: s.runs.filter((r) => r.repo_full_name !== fullName),
-        findingsByRun,
-      };
-    });
-  }, []);
-
-  const updateSettings = useCallback((patch: Partial<Settings>) => {
-    setState((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
-  }, []);
-
-  const runReview = useCallback(
-    async (input: NewReviewInput, emit: (line: LogLine) => void, signal?: AbortSignal) => {
-      const { run, findings } = await simulateReview(input, emit, { signal });
-      setState((s) => ({
-        ...s,
-        repos: s.repos.includes(run.repo_full_name) ? s.repos : [...s.repos, run.repo_full_name],
-        runs: [...s.runs, run],
-        findingsByRun: { ...s.findingsByRun, [run.pipeline_run_id]: findings },
-      }));
-      return run;
-    },
+  const settings = useMemo<DisplaySettings>(
+    () => ({ region: RUNTIME_CONFIG.region, modelId: RUNTIME_CONFIG.modelId }),
     [],
   );
 
-  const resetData = useCallback(() => {
-    const ds = generateDataset();
-    setState({
-      repos: [...REPOS],
-      runs: ds.runs,
-      findingsByRun: ds.findingsByRun,
-      settings: DEFAULT_SETTINGS,
-    });
-    setSelectedRepo(REPOS[0]);
-  }, []);
-
   const value = useMemo<StoreContextValue>(
     () => ({
+      loading: state.loading,
+      error: state.error,
       repos: state.repos,
       runs: state.runs,
-      settings: state.settings,
+      settings,
       selectedRepo,
       rangeKey,
       setSelectedRepo,
       setRangeKey,
       getFindings,
-      addRepo,
-      removeRepo,
-      updateSettings,
-      runReview,
-      resetData,
+      refresh,
     }),
     [
+      state.loading,
+      state.error,
       state.repos,
       state.runs,
-      state.settings,
+      settings,
       selectedRepo,
       rangeKey,
       getFindings,
-      addRepo,
-      removeRepo,
-      updateSettings,
-      runReview,
-      resetData,
+      refresh,
     ],
   );
 

@@ -1,4 +1,4 @@
-import { FlaskConical, Github, Plus } from "lucide-react";
+import { Github } from "lucide-react";
 import type { RangeKey } from "@/state/StoreProvider";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -9,8 +9,6 @@ interface HeaderProps {
   /** Selector de rango (opcional; solo algunas pantallas lo muestran). */
   rangeKey?: RangeKey;
   onRangeChange?: (key: RangeKey) => void;
-  /** Acción "Nueva revisión" (opcional). */
-  onNewReview?: () => void;
 }
 
 const RANGES: { key: RangeKey; label: string }[] = [
@@ -20,14 +18,7 @@ const RANGES: { key: RangeKey; label: string }[] = [
 ];
 
 /** Cabecera de página: contexto del repo, rango, tema y acciones. */
-export function Header({
-  repo,
-  title,
-  subtitle,
-  rangeKey,
-  onRangeChange,
-  onNewReview,
-}: HeaderProps) {
+export function Header({ repo, title, subtitle, rangeKey, onRangeChange }: HeaderProps) {
   const owner = repo.split("/")[0] ?? "";
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -35,10 +26,6 @@ export function Header({
         <div className="flex items-center gap-2 text-xs font-medium text-muted">
           <Github size={14} />
           {owner}
-          <span className="chip ml-1 bg-accent text-bg">
-            <FlaskConical size={12} />
-            Simulado
-          </span>
         </div>
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-ink">{title}</h1>
         <p className="mt-1 text-sm text-muted">{subtitle}</p>
@@ -61,12 +48,6 @@ export function Header({
           </div>
         )}
         <ThemeToggle />
-        {onNewReview && (
-          <button onClick={onNewReview} className="btn-primary">
-            <Plus size={16} />
-            Nueva revisión
-          </button>
-        )}
       </div>
     </header>
   );

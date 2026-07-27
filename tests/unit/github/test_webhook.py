@@ -48,7 +48,10 @@ def test_parse_pull_request_fixture() -> None:
     assert event.action == "opened"
     assert event.repo_full_name == "acme/widgets"
     assert event.pr_number == 42
+    assert event.pr_title == "Add configurable retry policy"
+    assert event.author == "octocat"
     assert event.commit_sha == "abc123def4567890"
+    assert event.base_commit_sha == "def456abc1237890"
     assert event.installation_id == 123456
 
 

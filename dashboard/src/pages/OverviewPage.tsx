@@ -24,12 +24,8 @@ import {
   typeTotals,
 } from "@/lib/selectors";
 
-interface OverviewPageProps {
-  onNewReview: () => void;
-}
-
 /** Pantalla principal: KPIs, tendencias, salud y detalle de revisiones. */
-export function OverviewPage({ onNewReview }: OverviewPageProps) {
+export function OverviewPage() {
   const { runs, selectedRepo, rangeKey, setRangeKey, getFindings } = useStore();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
@@ -71,7 +67,6 @@ export function OverviewPage({ onNewReview }: OverviewPageProps) {
         subtitle="Salud del repositorio y hallazgos de revisión a lo largo del tiempo"
         rangeKey={rangeKey}
         onRangeChange={setRangeKey}
-        onNewReview={onNewReview}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -133,3 +133,44 @@ def test_pull_request_fetch_caps_files_and_diff_bytes() -> None:
     assert result.files_truncated is True
     assert result.diff == "0123456789"
     assert result.diff_truncated is True
+
+
+def test_repository_archive_download_uses_immutable_ref_and_byte_cap() -> None:
+    """Archive downloads must target one SHA and reject a compressed overflow."""
+
+    successful_transport = QueueTransport(
+        [HttpResponse(status=200, headers={}, body=b"12345")]
+    )
+    successful_client = GitHubClient(
+        StaticTokenProvider(),
+        api_base_url="https://github.test",
+        transport=successful_transport,
+        max_repository_archive_bytes=5,
+    )
+
+    archive = successful_client.fetch_repository_archive(
+        "acme/widgets",
+        "def456abc1237890",
+        123456,
+    )
+
+    assert archive == b"12345"
+    assert successful_transport.requests[0].url.endswith(
+        "/repos/acme/widgets/zipball/def456abc1237890"
+    )
+
+    oversized_transport = QueueTransport(
+        [HttpResponse(status=200, headers={}, body=b"123456")]
+    )
+    oversized_client = GitHubClient(
+        StaticTokenProvider(),
+        transport=oversized_transport,
+        max_repository_archive_bytes=5,
+    )
+
+    with pytest.raises(PermanentError, match="byte limit"):
+        oversized_client.fetch_repository_archive(
+            "acme/widgets",
+            "def456abc1237890",
+            123456,
+        )
