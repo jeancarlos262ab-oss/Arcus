@@ -16,10 +16,10 @@ REGION = "us-east-1"
 TABLE_NAME = "arcus-test-review-history"
 BUCKET_NAME = "arcus-test-context-artifacts"
 API_KEY = "integration-dashboard-api-key"
-FIXTURE = (
-    Path(__file__).parents[2] / "fixtures" / "envelopes" / "reporter.json"
+FIXTURE = Path(__file__).parents[2] / "fixtures" / "envelopes" / "reporter.json"
+GRAPH_FIXTURE = (
+    Path(__file__).parents[2] / "fixtures" / "graphs" / "example_repo_graph.json"
 )
-GRAPH_FIXTURE = Path(__file__).parents[2] / "fixtures" / "graphs" / "example_repo_graph.json"
 
 
 def _event(
@@ -108,9 +108,7 @@ def test_reviews_endpoint_shapes_the_persisted_envelope(
 ) -> None:
     _configure_backend(monkeypatch)
 
-    response = lambda_handler(
-        _event("/reviews", query={"repo": "acme/widgets"}), None
-    )
+    response = lambda_handler(_event("/reviews", query={"repo": "acme/widgets"}), None)
 
     assert response["statusCode"] == 200
     body = json.loads(response["body"])
