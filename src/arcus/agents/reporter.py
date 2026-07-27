@@ -62,6 +62,13 @@ def generate_markdown_report(envelope: PipelineEnvelope) -> str:
     """Render deterministic Markdown for one GitHub review comment."""
 
     findings = [*envelope.consistency.findings, *envelope.bugs.findings]
+    context_mode = (
+        "unavailable"
+        if envelope.context.status is AgentStatus.FAILED
+        else "diff-only"
+        if envelope.context.ran_diff_only
+        else "graph + diff"
+    )
     counts = {
         severity: sum(finding.severity is severity for finding in findings)
         for severity in Severity
@@ -78,7 +85,7 @@ def generate_markdown_report(envelope: PipelineEnvelope) -> str:
         f"- High: **{counts[Severity.HIGH]}**",
         f"- Medium: **{counts[Severity.MEDIUM]}**",
         f"- Low: **{counts[Severity.LOW]}**",
-        f"- Context mode: **{'diff-only' if envelope.context.ran_diff_only else 'graph + diff'}**",
+        f"- Context mode: **{context_mode}**",
         "",
         "## Pipeline status",
         "",

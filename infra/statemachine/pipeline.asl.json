@@ -52,7 +52,7 @@
           "graph_version": null,
           "relevant_subgraph_ref": null,
           "conventions": null,
-          "ran_diff_only": true
+          "ran_diff_only": false
         },
         "consistency": {
           "status": "skipped",
@@ -112,7 +112,7 @@
         {
           "Variable": "$.context.status",
           "StringEquals": "failed",
-          "Next": "ConsistencyChecker"
+          "Next": "SkipAnalysisAfterContextFailure"
         }
       ],
       "Default": "ContextBuilder"
@@ -133,14 +133,26 @@
           "graph_version": null,
           "relevant_subgraph_ref": null,
           "conventions": null,
-          "ran_diff_only": true
+          "ran_diff_only": false
         },
-        "consistency.$": "$.consistency",
-        "bugs.$": "$.bugs",
-        "fixes.$": "$.fixes",
+        "consistency": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "bugs": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "fixes": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
         "report.$": "$.report"
       },
-      "Next": "ConsistencyChecker"
+      "Next": "SkipAnalysisAfterContextFailure"
     },
     "ContextBuilder": {
       "Type": "Task",
@@ -173,7 +185,18 @@
           "Next": "MarkContextBuilderFailed"
         }
       ],
-      "Next": "ConsistencyChecker"
+      "Next": "ContextAvailable"
+    },
+    "ContextAvailable": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.context.status",
+          "StringEquals": "failed",
+          "Next": "SkipAnalysisAfterContextFailure"
+        }
+      ],
+      "Default": "ConsistencyChecker"
     },
     "MarkContextBuilderFailed": {
       "Type": "Pass",
@@ -191,14 +214,52 @@
           "graph_version": null,
           "relevant_subgraph_ref": null,
           "conventions": null,
-          "ran_diff_only": true
+          "ran_diff_only": false
         },
-        "consistency.$": "$.consistency",
-        "bugs.$": "$.bugs",
-        "fixes.$": "$.fixes",
+        "consistency": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "bugs": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "fixes": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
         "report.$": "$.report"
       },
-      "Next": "ConsistencyChecker"
+      "Next": "SkipAnalysisAfterContextFailure"
+    },
+    "SkipAnalysisAfterContextFailure": {
+      "Type": "Pass",
+      "Parameters": {
+        "pipeline_run_id.$": "$.pipeline_run_id",
+        "created_at.$": "$.created_at",
+        "pr.$": "$.pr",
+        "context.$": "$.context",
+        "consistency": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "bugs": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "fixes": {
+          "status": "skipped",
+          "error": null,
+          "findings": []
+        },
+        "report.$": "$.report"
+      },
+      "Next": "Reporter"
     },
     "ConsistencyChecker": {
       "Type": "Task",

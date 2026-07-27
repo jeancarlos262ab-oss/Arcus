@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class EnsureRepositoryGraphHandler:
-    """Make graph context available while degrading safely to diff-only mode."""
+    """Make graph context available before analysis stages can run."""
 
     def __init__(
         self,
@@ -58,7 +58,7 @@ class EnsureRepositoryGraphHandler:
                 envelope,
                 "context",
                 error_code,
-                "Repository graph is unavailable; review continues in diff-only mode",
+                "Repository graph is unavailable; review analysis is skipped",
             )
         else:
             logger.info(

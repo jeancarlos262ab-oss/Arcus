@@ -155,7 +155,7 @@ The handler starts reviews for `opened` and `synchronize`. Valid but irrelevant,
 
 ## Automatic repository context and replay a webhook
 
-Repository graph creation is automatic. On the first accepted PR for a base commit, Ensure Repository Graph downloads a bounded GitHub archive using the installation token, safely extracts Python source into Lambda temporary storage, and writes an immutable graph under `graphs/{owner}/{repo}/commits/{base_sha}.json`. Later PRs with the same base commit reuse that object. If bootstrap fails or a repository exceeds a configured limit, the pipeline continues explicitly in diff-only mode.
+Repository graph creation is automatic. On the first accepted PR for a base commit, Ensure Repository Graph downloads a bounded GitHub archive using the installation token, safely extracts Python source into Lambda temporary storage, and writes an immutable graph under `graphs/{owner}/{repo}/commits/{base_sha}.json`. Later PRs with the same base commit reuse that object. If bootstrap fails or a repository exceeds a configured limit, the analysis stages are skipped and Reporter publishes the structured failure.
 
 `scripts/seed_graph.py` remains available only as an operator recovery tool. Normal repository onboarding must not require a local clone or manual graph upload.
 
@@ -259,7 +259,7 @@ The retained bucket, table, and secrets may continue to incur charges and can ca
 - **Webhook returns `401`:** ensure GitHub and Secrets Manager use exactly the same HMAC secret.
 - **Webhook returns `202` without an execution:** check repository/installation allowlists, quota counters, action, and duplicate claims.
 - **No review comment appears:** inspect Reporter logs and verify GitHub App issue-comment permissions.
-- **Graph bootstrap uses diff-only mode:** inspect Ensure Repository Graph logs, GitHub App contents permission, archive limits, and `graphs/{owner}/{repo}/commits/{base_sha}.json` in S3. Use `scripts/seed_graph.py` only for emergency recovery.
+- **Graph bootstrap fails:** inspect Ensure Repository Graph logs, GitHub App contents permission, archive limits, and `graphs/{owner}/{repo}/commits/{base_sha}.json` in S3. Analysis is skipped until graph context is available. Use `scripts/seed_graph.py` only for emergency recovery.
 - **Bedrock access denied:** verify model access, region, model ID, and the least-privilege model ARNs in `infra/template.yaml`.
 - **Resource already exists:** locate the owner stack or retained resource; CloudFormation does not adopt it automatically.
 - **S3 bucket name unavailable:** bucket names are global; change the naming strategy instead of creating an unmanaged bucket.

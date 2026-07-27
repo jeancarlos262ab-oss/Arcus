@@ -15,7 +15,7 @@ from arcus.graph.bootstrap import RepositoryGraphBootstrapper
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "envelopes" / "initial.json"
 
 
-def test_bootstrap_failure_returns_explicit_diff_only_envelope() -> None:
+def test_bootstrap_failure_returns_explicit_skipped_analysis_envelope() -> None:
     bootstrapper = Mock(spec=RepositoryGraphBootstrapper)
     bootstrapper.ensure.side_effect = PermanentError(
         "archive exceeded limit",
@@ -32,7 +32,7 @@ def test_bootstrap_failure_returns_explicit_diff_only_envelope() -> None:
     envelope = PipelineEnvelope.model_validate(output)
 
     assert envelope.context.status is AgentStatus.FAILED
-    assert envelope.context.ran_diff_only is True
+    assert envelope.context.ran_diff_only is False
     assert envelope.context.error is not None
     assert envelope.context.error.code == "repository_archive_too_large"
-    assert "diff-only" in envelope.context.error.message
+    assert "skipped" in envelope.context.error.message
