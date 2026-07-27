@@ -1,20 +1,32 @@
+<<<<<<< HEAD
 import { memo, useMemo, useRef, useState } from "react";
+=======
+import { memo, useMemo } from "react";
+>>>>>>> 09fe95a (dashboard)
 import { format } from "date-fns";
-import { Ban, GitPullRequest, Play } from "lucide-react";
+import { GitPullRequest, RefreshCw } from "lucide-react";
 
 import { Header } from "@/components/Header";
 import { Panel } from "@/components/Panel";
-import { Terminal } from "@/components/Terminal";
-import { Field, Select } from "@/components/ui/Field";
 import { StatusBadge } from "@/components/Badge";
 import { useStore } from "@/state/StoreProvider";
+<<<<<<< HEAD
 import type { LogLine } from "@/lib/simulate";
+=======
+>>>>>>> 09fe95a (dashboard)
 import type { AgentStatus, ReviewRun } from "@/lib/types";
 
-/** Pantalla de actividad: ejecutar revisiones (con terminal en vivo) + feed. */
+/**
+ * Pantalla de actividad: feed de revisiones reales procesadas por el pipeline.
+ *
+ * El dashboard es de solo lectura (ver design.md): las revisiones las dispara
+ * GitHub vía webhook, nunca el navegador. Esta pantalla refleja lo que el
+ * pipeline de Step Functions ya escribió en DynamoDB.
+ */
 export function ActivityPage() {
-  const { repos, runs, selectedRepo, runReview } = useStore();
+  const { runs, selectedRepo, refresh } = useStore();
 
+<<<<<<< HEAD
   const [repo, setRepo] = useState(selectedRepo);
   const [prNumber, setPrNumber] = useState("128");
   const [prTitle, setPrTitle] = useState("Refactor retry logic in Bedrock client");
@@ -53,15 +65,20 @@ export function ActivityPage() {
   // línea de log que llega mientras el pipeline está "corriendo".
   const recent = useMemo(() => [...runs].reverse().slice(0, 15), [runs]);
   const repoOptions = useMemo(() => repos.map((r) => ({ value: r, label: r })), [repos]);
+=======
+  // Se recalcula solo cuando cambia el historial de corridas.
+  const recent = useMemo(() => [...runs].reverse().slice(0, 30), [runs]);
+>>>>>>> 09fe95a (dashboard)
 
   return (
     <>
       <Header
         repo={selectedRepo}
         title="Actividad"
-        subtitle="Dispara una revisión y observa el pipeline de agentes en tiempo real"
+        subtitle="Revisiones procesadas por el pipeline de agentes en AWS Step Functions"
       />
 
+<<<<<<< HEAD
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5 lg:items-stretch">
         {/* Formulario */}
         <div className="lg:col-span-2">
@@ -127,11 +144,37 @@ export function ActivityPage() {
           )}
         </Panel>
       </div>
+=======
+      <div className="mb-4 flex justify-end">
+        <button onClick={refresh} className="btn-ghost">
+          <RefreshCw size={14} />
+          Actualizar
+        </button>
+      </div>
+
+      <Panel title="Actividad reciente" subtitle="Últimas revisiones en todos los repos">
+        {recent.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted">
+            Aún no hay revisiones registradas para este repositorio.
+          </p>
+        ) : (
+          <div className="divide-y divide-border">
+            {recent.map((r) => (
+              <ActivityRow key={r.pipeline_run_id} run={r} />
+            ))}
+          </div>
+        )}
+      </Panel>
+>>>>>>> 09fe95a (dashboard)
     </>
   );
 }
 
+<<<<<<< HEAD
 /** Fila del feed de actividad, memoizada para no re-renderizar mientras el terminal transmite logs. */
+=======
+/** Fila del feed de actividad, memoizada. */
+>>>>>>> 09fe95a (dashboard)
 const ActivityRow = memo(function ActivityRow({ run: r }: { run: ReviewRun }) {
   const failed = Object.values(r.agent_status).filter((s) => s === "failed").length;
   const status: AgentStatus = failed > 0 ? "failed" : "ok";

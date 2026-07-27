@@ -1,16 +1,24 @@
-import { useMemo, useState } from "react";
-import { Boxes, GitBranch, Workflow } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Boxes, GitBranch, RefreshCw, TriangleAlert, Workflow } from "lucide-react";
 
 import { Header } from "@/components/Header";
 import { Panel } from "@/components/Panel";
 import { GraphView } from "@/components/GraphView";
 import { useStore } from "@/state/StoreProvider";
 import { useTheme } from "@/state/ThemeProvider";
-import { getGraph } from "@/lib/mockGraph";
+import { ApiRequestError, fetchGraph } from "@/lib/api";
 import { LINK_TYPE_LABEL, NODE_KIND_LABEL, nodeKindColor } from "@/lib/theme";
-import type { NodeKind } from "@/lib/types";
+import type { NodeKind, RepoGraph } from "@/lib/types";
 
-/** Pantalla del grafo de contexto que construye el Context Builder. */
+const EMPTY_GRAPH: RepoGraph = {
+  repo: "",
+  graph_version: "",
+  language: "python",
+  nodes: [],
+  links: [],
+};
+
+/** Pantalla del grafo de contexto persistido en S3 por el Context Builder. */
 export function GraphPage() {
   const { selectedRepo } = useStore();
   const { p } = useTheme();
@@ -19,7 +27,36 @@ export function GraphPage() {
   // grafo hasta que se vuelvan a activar.
   const [hiddenKinds, setHiddenKinds] = useState<Set<NodeKind>>(() => new Set());
 
-  const graph = useMemo(() => getGraph(selectedRepo), [selectedRepo]);
+  const [graph, setGraph] = useState<RepoGraph>(EMPTY_GRAPH);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
+
+  useEffect(() => {
+    if (!selectedRepo) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    fetchGraph(selectedRepo)
+      .then((data) => {
+        if (!cancelled) setGraph(data);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setGraph(EMPTY_GRAPH);
+        setError(
+          err instanceof ApiRequestError
+            ? err.message
+            : "No se pudo cargar el grafo de contexto para este repositorio.",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRepo, retryToken]);
 
   const counts = useMemo(() => {
     const c: Record<NodeKind, number> = { module: 0, class: 0, function: 0, method: 0 };
@@ -58,13 +95,33 @@ export function GraphPage() {
         subtitle="Mapa persistente del repo: módulos, símbolos y sus relaciones"
       />
 
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat icon={Boxes} label="Nodos" value={graph.nodes.length} />
-        <Stat icon={Workflow} label="Relaciones" value={graph.links.length} />
-        <Stat icon={GitBranch} label="Versión" value={graph.graph_version} mono />
-      </div>
+      {error ? (
+        <Panel className="mb-4">
+          <div className="flex flex-col items-start gap-3 py-4">
+            <div className="flex items-center gap-2 text-high">
+              <TriangleAlert size={18} />
+              <span className="font-semibold">No se pudo cargar el grafo</span>
+            </div>
+            <p className="text-sm text-muted">{error}</p>
+            <button onClick={() => setRetryToken((t) => t + 1)} className="btn-primary">
+              <RefreshCw size={14} />
+              Reintentar
+            </button>
+          </div>
+        </Panel>
+      ) : loading ? (
+        <Panel className="mb-4">
+          <p className="py-10 text-center text-sm text-muted">Cargando grafo de contexto…</p>
+        </Panel>
+      ) : (
+        <>
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Stat icon={Boxes} label="Nodos" value={graph.nodes.length} />
+            <Stat icon={Workflow} label="Relaciones" value={graph.links.length} />
+            <Stat icon={GitBranch} label="Versión" value={graph.graph_version} mono />
+          </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
         {/* Grafo */}
         <div className="lg:col-span-3">
           <Panel
@@ -174,7 +231,9 @@ export function GraphPage() {
             </div>
           )}
         </Panel>
-      </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

@@ -147,6 +147,8 @@ def test_all_installations_still_requires_an_approved_repository() -> None:
         action="opened",
         repo_full_name="acme/widgets",
         pr_number=7,
+        pr_title="Add configurable retry policy",
+        author="octocat",
         commit_sha="abc123",
         installation_id=999999,
     )
@@ -167,6 +169,8 @@ def test_all_repositories_still_requires_an_approved_installation() -> None:
         action="opened",
         repo_full_name="another-owner/another-repository",
         pr_number=7,
+        pr_title="Add configurable retry policy",
+        author="octocat",
         commit_sha="abc123",
         installation_id=123456,
     )

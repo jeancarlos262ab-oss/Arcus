@@ -258,6 +258,19 @@ Resources:
       Name: !Sub arcus-${Environment}-github-app-private-key
       Description: Populate the GitHub App PEM private key outside CloudFormation.
 
+  DashboardApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub arcus-${Environment}-dashboard-api-key
+      Description: Populate the shared API key required by the read-only dashboard API.
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: api_key
+        ExcludePunctuation: true
+        PasswordLength: 40
+
   CostAlarmTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -483,6 +496,86 @@ Resources:
               Action: dynamodb:PutItem
               Resource: !GetAtt ReviewHistoryTable.Arn
 
+  DashboardApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/arcus-${Environment}-dashboard
+      RetentionInDays: 14
+
+  DashboardHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Description: Public read-only API for the Arcus dashboard SPA, protected by an API key.
+      StageName: "$default"
+      FailOnWarnings: true
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: [GET]
+        AllowHeaders: [x-api-key, content-type]
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
+      AccessLogSettings:
+        DestinationArn: !GetAtt DashboardApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","requestTime":"$context.requestTime",
+          "httpMethod":"$context.httpMethod","routeKey":"$context.routeKey",
+          "status":"$context.status","responseLength":"$context.responseLength"}
+      Tags:
+        Project: Arcus
+        Environment: !Ref Environment
+        ManagedBy: SAM
+
+  DashboardApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-dashboard-api
+      Description: Serves read-only repository, review, and graph data to the dashboard SPA.
+      CodeUri: ../
+      Handler: arcus.entrypoints.dashboard_api.lambda_handler
+      Timeout: 10
+      Environment:
+        Variables:
+          DASHBOARD_API_KEY_SECRET_ARN: !Ref DashboardApiKeySecret
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadDashboardApiKey
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref DashboardApiKeySecret
+            - Sid: ReadReviewHistory
+              Effect: Allow
+              Action: dynamodb:Query
+              Resource: !GetAtt ReviewHistoryTable.Arn
+            - Sid: ReadGraphArtifacts
+              Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub ${ContextArtifactsBucket.Arn}/graphs/*
+      Events:
+        Repos:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /repos
+            Method: GET
+        Reviews:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /reviews
+            Method: GET
+        Graph:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /graph
+            Method: GET
+
   WebhookFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
@@ -537,6 +630,14 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       LogGroupName: !Sub /aws/lambda/${ReporterFunction}
+      RetentionInDays: 14
+
+  DashboardApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${DashboardApiFunction}
       RetentionInDays: 14
 
   PipelineLogGroup:
@@ -765,3 +866,11 @@ Outputs:
     Value: !GetAtt FixSuggesterFunction.Arn
   ReporterFunctionArn:
     Value: !GetAtt ReporterFunction.Arn
+  DashboardApiId:
+    Value: !Ref DashboardHttpApi
+  DashboardApiUrl:
+    Value: !Sub https://${DashboardHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  DashboardApiKeySecretArn:
+    Value: !Ref DashboardApiKeySecret
+  DashboardApiFunctionArn:
+    Value: !GetAtt DashboardApiFunction.Arn

@@ -450,6 +450,8 @@ def _build_execution_claim(
         pr=PullRequestMetadata(
             repo_full_name=parsed_event.repo_full_name,
             pr_number=parsed_event.pr_number,
+            pr_title=parsed_event.pr_title,
+            author=parsed_event.author,
             commit_sha=parsed_event.commit_sha,
             installation_id=parsed_event.installation_id,
         ),
