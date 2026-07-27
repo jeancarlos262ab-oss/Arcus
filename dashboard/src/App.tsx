@@ -1,9 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-<<<<<<< HEAD
-import { Menu } from "lucide-react";
-=======
 import { Menu, RefreshCw, TriangleAlert } from "lucide-react";
->>>>>>> 09fe95a (dashboard)
 
 import { Sidebar, type PageKey } from "@/components/Sidebar";
 import { PageSkeleton } from "@/components/PageSkeleton";
@@ -57,21 +53,6 @@ function Shell() {
           <Menu size={16} />
           Menú
         </button>
-<<<<<<< HEAD
-
-        <div key={page} className="animate-fade-in">
-          <Suspense fallback={<PageSkeleton />}>
-            {page === "overview" && <OverviewPage onNewReview={() => setPage("activity")} />}
-            {page === "activity" && <ActivityPage />}
-            {page === "graph" && <GraphPage />}
-            {page === "findings" && <FindingsPage />}
-            {page === "settings" && <SettingsPage />}
-          </Suspense>
-        </div>
-
-        <footer className="mt-8 flex flex-col items-start gap-1 text-xs text-faint sm:flex-row sm:items-center sm:justify-between">
-          <span>Datos simulados · listo para conectar API de DynamoDB</span>
-=======
 
         {error ? (
           <div className="panel flex flex-col items-start gap-3 p-6">
@@ -106,7 +87,6 @@ function Shell() {
 
         <footer className="mt-8 flex flex-col items-start gap-1 text-xs text-faint sm:flex-row sm:items-center sm:justify-between">
           <span>Datos en vivo desde DynamoDB / S3</span>
->>>>>>> 09fe95a (dashboard)
           <span>Arcus · Repo Health Dashboard</span>
         </footer>
       </main>

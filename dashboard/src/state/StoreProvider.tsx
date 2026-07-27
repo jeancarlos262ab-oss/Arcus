@@ -27,47 +27,6 @@ interface StoreState {
   findingsByRun: Record<string, Finding[]>;
 }
 
-<<<<<<< HEAD
-const STORAGE_KEY = "arcus.store.v1";
-
-/**
- * Normaliza settings cargadas de localStorage: la región, el modelo, el
- * App ID de GitHub y el estado del webhook son propiedad del backend
- * desplegado, nunca del navegador, así que siempre se fuerzan al valor
- * actual en vez de leerse de un guardado previo.
- */
-function normalizeSettings(settings: Partial<Settings> | undefined): Settings {
-  return {
-    ...DEFAULT_SETTINGS,
-    ...settings,
-    region: RUNTIME_CONFIG.region,
-    modelId: RUNTIME_CONFIG.modelId,
-    githubAppId: DEFAULT_SETTINGS.githubAppId,
-    webhookConfigured: DEFAULT_SETTINGS.webhookConfigured,
-  };
-}
-
-function loadInitial(): PersistShape {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as PersistShape;
-      if (parsed.runs && parsed.repos) {
-        return { ...parsed, settings: normalizeSettings(parsed.settings) };
-      }
-    }
-  } catch {
-    // Ignora datos corruptos y re-siembra.
-  }
-  const ds = generateDataset();
-  return {
-    repos: [...REPOS],
-    runs: ds.runs,
-    findingsByRun: ds.findingsByRun,
-    settings: DEFAULT_SETTINGS,
-  };
-}
-=======
 const INITIAL_STATE: StoreState = {
   loading: true,
   error: null,
@@ -75,7 +34,6 @@ const INITIAL_STATE: StoreState = {
   runs: [],
   findingsByRun: {},
 };
->>>>>>> 09fe95a (dashboard)
 
 interface StoreContextValue {
   loading: boolean;
