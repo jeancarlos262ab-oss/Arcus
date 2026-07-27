@@ -1,16 +1,8 @@
 import { useState } from "react";
-<<<<<<< HEAD
-import { Check, Plus, Trash2, TriangleAlert } from "lucide-react";
-
-import { Header } from "@/components/Header";
-import { Panel } from "@/components/Panel";
-import { Field, Select, Toggle } from "@/components/ui/Field";
-=======
 import { RefreshCw } from "lucide-react";
 
 import { Header } from "@/components/Header";
 import { Panel } from "@/components/Panel";
->>>>>>> 09fe95a (dashboard)
 import { ThemePreviewCard } from "@/components/ui/ThemePreview";
 import { useStore } from "@/state/StoreProvider";
 import { useTheme } from "@/state/ThemeProvider";
@@ -22,11 +14,7 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: "system", label: "Sistema" },
 ];
 
-<<<<<<< HEAD
-/** Pantalla de ajustes: apariencia, repos, pipeline, integración y datos. */
-=======
 /** Pantalla de ajustes: apariencia y configuración del backend (solo lectura). */
->>>>>>> 09fe95a (dashboard)
 export function SettingsPage() {
   const { mode, setMode } = useTheme();
   const { repos, settings, selectedRepo, refresh } = useStore();
@@ -76,17 +64,10 @@ export function SettingsPage() {
                 readOnly
                 aria-readonly="true"
               />
-<<<<<<< HEAD
-            </Field>
-            <p className="text-[0.72rem] text-faint">
-              Estos valores son informativos y no se guardan como configuración de ejecución en
-              el navegador.
-=======
             </div>
             <p className="text-[0.72rem] text-faint">
               Estos valores son informativos; la configuración real vive en las variables de
               entorno del backend desplegado (BEDROCK_MODEL_ID, AWS_REGION).
->>>>>>> 09fe95a (dashboard)
             </p>
           </div>
         </Panel>
@@ -128,42 +109,9 @@ export function SettingsPage() {
               }}
               className="btn-primary"
             >
-<<<<<<< HEAD
-              <input
-                className="input cursor-not-allowed opacity-75"
-                placeholder="Configurado en el backend"
-                value={settings.githubAppId}
-                readOnly
-                aria-readonly="true"
-              />
-            </Field>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-semibold text-ink">Webhook configurado</div>
-                <div className="text-[0.78rem] text-muted">Firma HMAC verificada por el backend</div>
-              </div>
-              <Toggle checked={settings.webhookConfigured} disabled />
-            </div>
-            <div
-              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-white ${
-                settings.githubAppId && settings.webhookConfigured ? "bg-success" : "bg-medium"
-              }`}
-            >
-              {settings.githubAppId && settings.webhookConfigured ? (
-                <>
-                  <Check size={14} /> Integración lista
-                </>
-              ) : (
-                <>
-                  <TriangleAlert size={14} /> Configura la GitHub App y el webhook en AWS
-                </>
-              )}
-            </div>
-=======
               <RefreshCw size={14} />
               {refreshed ? "Actualizado" : "Actualizar ahora"}
             </button>
->>>>>>> 09fe95a (dashboard)
           </div>
         </Panel>
       </div>

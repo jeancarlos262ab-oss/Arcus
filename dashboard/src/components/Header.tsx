@@ -26,13 +26,6 @@ export function Header({ repo, title, subtitle, rangeKey, onRangeChange }: Heade
         <div className="flex items-center gap-2 text-xs font-medium text-muted">
           <Github size={14} />
           {owner}
-<<<<<<< HEAD
-          <span className="chip ml-1 bg-accent text-bg">
-            <FlaskConical size={12} />
-            Simulado
-          </span>
-=======
->>>>>>> 09fe95a (dashboard)
         </div>
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-ink">{title}</h1>
         <p className="mt-1 text-sm text-muted">{subtitle}</p>
