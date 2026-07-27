@@ -20,10 +20,18 @@ def settings() -> Settings:
 
 @lru_cache(maxsize=1)
 def artifacts() -> S3ArtifactStore:
-    """Create one bounded S3 artifact store per warm process."""
+    """Create one diff-bounded S3 artifact store per warm process."""
 
     bucket_name = _required_environment("S3_ARTIFACT_BUCKET")
     return S3ArtifactStore(bucket_name, max_artifact_bytes=settings().max_diff_bytes)
+
+
+@lru_cache(maxsize=1)
+def graph_artifacts() -> S3ArtifactStore:
+    """Create one graph-bounded S3 artifact store per warm process."""
+
+    bucket_name = _required_environment("S3_ARTIFACT_BUCKET")
+    return S3ArtifactStore(bucket_name, max_artifact_bytes=settings().max_graph_bytes)
 
 
 @lru_cache(maxsize=1)

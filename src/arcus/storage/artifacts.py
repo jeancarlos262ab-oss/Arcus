@@ -6,7 +6,6 @@ import json
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
 
-import boto3
 from botocore.config import Config
 
 
@@ -21,6 +20,10 @@ class S3Client(Protocol):
 
     def get_object(self, *, Bucket: str, Key: str) -> Mapping[str, object]:
         """Load one artifact body."""
+        ...
+
+    def head_object(self, *, Bucket: str, Key: str) -> Mapping[str, object]:
+        """Inspect one object without downloading its body."""
         ...
 
 
@@ -51,6 +54,8 @@ class S3ArtifactStore:
         self._bucket_name = bucket_name
         self._max_artifact_bytes = max_artifact_bytes
         if client is None:
+            import boto3
+
             boto3_module = cast(Any, boto3)
             raw_client = boto3_module.client(
                 "s3",
@@ -71,19 +76,32 @@ class S3ArtifactStore:
 
         return f"s3://{self._bucket_name}/{_normalise_key(key)}"
 
+    def object_exists(self, key: str) -> bool:
+        """Return whether an object exists without masking authorization failures."""
+
+        from botocore.exceptions import ClientError
+
+        normalised_key = _normalise_key(key)
+        try:
+            self._client.head_object(Bucket=self._bucket_name, Key=normalised_key)
+        except ClientError as error:
+            if _client_error_code(error) in {"404", "NoSuchKey", "NotFound"}:
+                return False
+            raise
+        return True
+
     def put_text(self, key: str, text: str, *, content_type: str = "text/plain") -> str:
         """Store a UTF-8 artifact and return its S3 reference."""
 
-        body = text.encode("utf-8")
-        if len(body) > self._max_artifact_bytes:
-            raise ValueError("artifact exceeds the configured byte limit")
+        normalised_key = _normalise_key(key)
+        body = self._bounded_body(text)
         self._client.put_object(
             Bucket=self._bucket_name,
-            Key=_normalise_key(key),
+            Key=normalised_key,
             Body=body,
             ContentType=content_type,
         )
-        return f"s3://{self._bucket_name}/{_normalise_key(key)}"
+        return self.reference(normalised_key)
 
     def put_json(self, key: str, payload: Mapping[str, object]) -> str:
         """Serialize one compact JSON artifact with the same byte guard."""
@@ -93,6 +111,35 @@ class S3ArtifactStore:
             json.dumps(payload, separators=(",", ":")),
             content_type="application/json",
         )
+
+    def put_json_if_absent(
+        self,
+        key: str,
+        payload: Mapping[str, object],
+    ) -> tuple[str, bool]:
+        """Create an immutable JSON artifact once and report whether it was written."""
+
+        from botocore.exceptions import ClientError
+
+        normalised_key = _normalise_key(key)
+        body = self._bounded_body(json.dumps(payload, separators=(",", ":")))
+        raw_client = cast(Any, self._client)
+        try:
+            raw_client.put_object(
+                Bucket=self._bucket_name,
+                Key=normalised_key,
+                Body=body,
+                ContentType="application/json",
+                IfNoneMatch="*",
+            )
+        except ClientError as error:
+            if _client_error_code(error) in {
+                "ConditionalRequestConflict",
+                "PreconditionFailed",
+            }:
+                return self.reference(normalised_key), False
+            raise
+        return self.reference(normalised_key), True
 
     def get_text(self, reference: str) -> str:
         """Read one S3 reference without buffering more than the hard limit."""
@@ -117,6 +164,14 @@ class S3ArtifactStore:
             raise ValueError("artifact JSON must contain an object")
         return cast(Mapping[str, object], payload)
 
+    def _bounded_body(self, text: str) -> bytes:
+        """Encode text only when it fits the configured object budget."""
+
+        body = text.encode("utf-8")
+        if len(body) > self._max_artifact_bytes:
+            raise ValueError("artifact exceeds the configured byte limit")
+        return body
+
 
 def parse_s3_reference(reference: str) -> tuple[str, str]:
     """Split a validated-looking S3 URI into bucket and key."""
@@ -136,3 +191,14 @@ def _normalise_key(key: str) -> str:
     if not normalised or ".." in normalised.split("/"):
         raise ValueError("artifact key is invalid")
     return normalised
+
+
+def _client_error_code(error: Any) -> str:
+    """Read one botocore error code without assuming the response shape."""
+
+    response = getattr(error, "response", {})
+    if not isinstance(response, Mapping):
+        return ""
+    details = response.get("Error", {})
+    code = details.get("Code") if isinstance(details, Mapping) else None
+    return str(code) if code is not None else ""

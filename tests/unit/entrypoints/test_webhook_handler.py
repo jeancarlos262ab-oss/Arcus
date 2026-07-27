@@ -148,6 +148,7 @@ def test_all_installations_still_requires_an_approved_repository() -> None:
         repo_full_name="acme/widgets",
         pr_number=7,
         commit_sha="abc123",
+        base_commit_sha="def456",
         installation_id=999999,
     )
 
@@ -168,6 +169,7 @@ def test_all_repositories_still_requires_an_approved_installation() -> None:
         repo_full_name="another-owner/another-repository",
         pr_number=7,
         commit_sha="abc123",
+        base_commit_sha="def456",
         installation_id=123456,
     )
 
@@ -240,6 +242,7 @@ def test_supported_action_claims_atomically_and_starts_pipeline(action: str) -> 
     assert start["input"] == claim.execution_input
     envelope = PipelineEnvelope.model_validate_json(start["input"])
     assert envelope.pr.repo_full_name == "acme/widgets"
+    assert envelope.pr.base_commit_sha == "def456abc1237890"
     assert envelope.pr.diff_ref is None
     assert envelope.context.status.value == "pending"
     assert envelope.report.status.value == "pending"

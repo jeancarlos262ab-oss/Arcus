@@ -6,9 +6,10 @@ import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from time import sleep, time
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import jwt
 
@@ -41,6 +42,44 @@ class HttpTransport(Protocol):
         ...
 
 
+class _SafeRedirectHandler(HTTPRedirectHandler):
+    """Allow bounded HTTPS redirects without forwarding cross-origin secrets."""
+
+    max_redirections = 5
+
+    def redirect_request(
+        self,
+        req: Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> Request | None:
+        """Strip credentials across origins and reject plaintext redirect targets."""
+
+        target = urlsplit(newurl)
+        if target.scheme.lower() != "https":
+            raise HTTPError(
+                newurl,
+                code,
+                "GitHub redirect target must use HTTPS",
+                headers,
+                fp,
+            )
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is None:
+            return None
+        source = urlsplit(req.full_url)
+        if (source.scheme.lower(), source.netloc.lower()) != (
+            target.scheme.lower(),
+            target.netloc.lower(),
+        ):
+            redirected.remove_header("Authorization")
+            redirected.remove_header("Cookie")
+        return redirected
+
+
 class UrlLibTransport:
     """Small GitHub transport with at most three Retry-After-aware attempts."""
 
@@ -58,6 +97,7 @@ class UrlLibTransport:
         self._max_attempts = max_attempts
         self._timeout_seconds = timeout_seconds
         self._sleep = sleeper
+        self._opener = build_opener(_SafeRedirectHandler())
 
     def request(
         self,
@@ -78,7 +118,10 @@ class UrlLibTransport:
                 method=method,
             )
             try:
-                raw_response = urlopen(request, timeout=self._timeout_seconds)
+                raw_response = self._opener.open(
+                    request,
+                    timeout=self._timeout_seconds,
+                )
                 with raw_response as response:
                     response_body = cast(bytes, response.read(max_response_bytes))
                     response_headers = {

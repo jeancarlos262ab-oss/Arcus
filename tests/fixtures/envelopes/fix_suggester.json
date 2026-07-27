@@ -5,6 +5,7 @@
     "repo_full_name": "acme/widgets",
     "pr_number": 42,
     "commit_sha": "abc123def4567890",
+    "base_commit_sha": "def456abc1237890",
     "installation_id": 123456,
     "changed_files": ["src/config.py", "tests/test_config.py"],
     "diff_ref": "s3://arcus-dev-context-artifacts/prs/acme/widgets/42/diff.patch"
@@ -12,7 +13,7 @@
   "context": {
     "status": "ok",
     "error": null,
-    "graph_ref": "s3://arcus-dev-context-artifacts/graphs/acme/widgets/main.json",
+    "graph_ref": "s3://arcus-dev-context-artifacts/graphs/acme/widgets/commits/def456abc1237890.json",
     "graph_version": "def456abc1237890",
     "relevant_subgraph_ref": "s3://arcus-dev-context-artifacts/prs/acme/widgets/42/subgraph.json",
     "conventions": {

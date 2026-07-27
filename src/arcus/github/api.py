@@ -33,7 +33,7 @@ class PullRequestData:
 
 
 class GitHubClient:
-    """Read PR data and create or update one marked review comment."""
+    """Read PR data, download repository archives, and manage review comments."""
 
     def __init__(
         self,
@@ -43,17 +43,25 @@ class GitHubClient:
         transport: HttpTransport | None = None,
         max_changed_files: int = 50,
         max_diff_bytes: int = 524_288,
+        max_repository_archive_bytes: int = 20_971_520,
         max_comment_pages: int = 10,
     ) -> None:
         """Create a client with hard pagination and response-size bounds."""
 
-        if max_changed_files < 1 or max_diff_bytes < 1 or max_comment_pages < 1:
+        limits = (
+            max_changed_files,
+            max_diff_bytes,
+            max_repository_archive_bytes,
+            max_comment_pages,
+        )
+        if any(limit < 1 for limit in limits):
             raise ValueError("GitHub API limits must be positive")
         self._token_provider = token_provider
         self._api_base_url = api_base_url.rstrip("/")
         self._transport = transport or UrlLibTransport()
         self._max_changed_files = max_changed_files
         self._max_diff_bytes = max_diff_bytes
+        self._max_repository_archive_bytes = max_repository_archive_bytes
         self._max_comment_pages = max_comment_pages
 
     def fetch_pull_request(
@@ -117,6 +125,35 @@ class GitHubClient:
             files_truncated=files_truncated,
             diff_truncated=diff_truncated,
         )
+
+    def fetch_repository_archive(
+        self,
+        repo_full_name: str,
+        commit_sha: str,
+        installation_id: int,
+    ) -> bytes:
+        """Download a ZIP archive for one immutable commit within the byte cap."""
+
+        token = self._token_provider.get_installation_token(installation_id)
+        repo = quote(repo_full_name, safe="/")
+        encoded_commit = quote(commit_sha, safe="")
+        response = self._transport.request(
+            "GET",
+            f"{self._api_base_url}/repos/{repo}/zipball/{encoded_commit}",
+            headers=_headers(token),
+            max_response_bytes=self._max_repository_archive_bytes + 1,
+        )
+        if len(response.body) > self._max_repository_archive_bytes:
+            raise PermanentError(
+                "GitHub repository archive exceeded the configured byte limit",
+                code="github_archive_too_large",
+            )
+        if not response.body:
+            raise PermanentError(
+                "GitHub returned an empty repository archive",
+                code="github_archive_empty",
+            )
+        return response.body
 
     def upsert_review_comment(
         self,

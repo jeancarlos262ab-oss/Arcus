@@ -6,18 +6,14 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from time import perf_counter
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import (
-    BotoCoreError,
-    ClientError,
-    HTTPClientError,
-    IncompleteReadError,
-)
-from botocore.exceptions import ConnectionError as BotoConnectionError
 from pydantic import TypeAdapter, ValidationError
+
+if TYPE_CHECKING:
+    from botocore.exceptions import ClientError
 
 from arcus.config import Settings, get_settings
 from arcus.contracts import Finding, FixBatch
@@ -212,6 +208,14 @@ class BedrockClient:
         temperature: float,
     ) -> Mapping[str, object]:
         """Perform one SDK call and translate provider exceptions."""
+
+        from botocore.exceptions import (
+            BotoCoreError,
+            ClientError,
+            HTTPClientError,
+            IncompleteReadError,
+        )
+        from botocore.exceptions import ConnectionError as BotoConnectionError
 
         try:
             return self._runtime_client.converse(

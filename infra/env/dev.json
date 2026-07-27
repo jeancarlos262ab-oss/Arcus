@@ -9,5 +9,9 @@
   {"ParameterKey": "ReviewsPerInstallationHour", "ParameterValue": "5"},
   {"ParameterKey": "WebhookThrottleRate", "ParameterValue": "1"},
   {"ParameterKey": "WebhookThrottleBurst", "ParameterValue": "5"},
+  {"ParameterKey": "MaxRepositoryArchiveBytes", "ParameterValue": "20971520"},
+  {"ParameterKey": "MaxRepositoryExtractedBytes", "ParameterValue": "104857600"},
+  {"ParameterKey": "MaxRepositoryFiles", "ParameterValue": "5000"},
+  {"ParameterKey": "MaxGraphBytes", "ParameterValue": "5242880"},
   {"ParameterKey": "ArtifactRetentionDays", "ParameterValue": "14"}
 ]

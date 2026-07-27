@@ -451,6 +451,7 @@ def _build_execution_claim(
             repo_full_name=parsed_event.repo_full_name,
             pr_number=parsed_event.pr_number,
             commit_sha=parsed_event.commit_sha,
+            base_commit_sha=parsed_event.base_commit_sha,
             installation_id=parsed_event.installation_id,
         ),
     )

@@ -6,7 +6,6 @@ import json
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
 
-import boto3
 from botocore.config import Config
 
 from arcus.contracts import PipelineEnvelope
@@ -44,6 +43,8 @@ class ReviewHistoryStore:
         self._table_name = table_name
         self._ttl_seconds = ttl_seconds
         if client is None:
+            import boto3
+
             boto3_module = cast(Any, boto3)
             raw_client = boto3_module.client(
                 "dynamodb",

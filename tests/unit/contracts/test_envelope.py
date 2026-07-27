@@ -29,6 +29,7 @@ def test_every_stage_fixture_is_a_valid_pipeline_envelope(fixture_path: Path) ->
 
     assert envelope.pr.repo_full_name == "acme/widgets"
     assert envelope.pr.pr_number == 42
+    assert envelope.pr.base_commit_sha == "def456abc1237890"
     assert envelope.context.status in AgentStatus
 
 
@@ -43,6 +44,7 @@ def test_envelope_has_safe_defaults_for_a_new_pipeline() -> None:
             repo_full_name="acme/widgets",
             pr_number=42,
             commit_sha="abc123def4567890",
+            base_commit_sha="def456abc1237890",
             installation_id=123456,
         ),
     )

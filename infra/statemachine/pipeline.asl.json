@@ -1,7 +1,7 @@
 {
   "Comment": "Arcus multi-agent pull request review pipeline",
   "StartAt": "FetchPR",
-  "TimeoutSeconds": 600,
+  "TimeoutSeconds": 720,
   "States": {
     "FetchPR": {
       "Type": "Task",
@@ -34,7 +34,7 @@
           "Next": "MarkFetchPRFailed"
         }
       ],
-      "Next": "ContextBuilder"
+      "Next": "EnsureRepositoryGraph"
     },
     "MarkFetchPRFailed": {
       "Type": "Pass",
@@ -72,6 +72,75 @@
         "report.$": "$.report"
       },
       "Next": "Reporter"
+    },
+    "EnsureRepositoryGraph": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${EnsureRepositoryGraphFunctionArn}",
+        "Payload.$": "$"
+      },
+      "OutputPath": "$.Payload",
+      "TimeoutSeconds": 105,
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "BackoffRate": 2.0,
+          "MaxDelaySeconds": 8,
+          "JitterStrategy": "FULL",
+          "MaxAttempts": 1
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.lastError",
+          "Next": "MarkRepositoryGraphBootstrapFailed"
+        }
+      ],
+      "Next": "RepositoryGraphAvailable"
+    },
+    "RepositoryGraphAvailable": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.context.status",
+          "StringEquals": "failed",
+          "Next": "ConsistencyChecker"
+        }
+      ],
+      "Default": "ContextBuilder"
+    },
+    "MarkRepositoryGraphBootstrapFailed": {
+      "Type": "Pass",
+      "Parameters": {
+        "pipeline_run_id.$": "$.pipeline_run_id",
+        "created_at.$": "$.created_at",
+        "pr.$": "$.pr",
+        "context": {
+          "status": "failed",
+          "error": {
+            "code": "repository_graph_bootstrap_infrastructure_failure",
+            "message": "Repository graph bootstrap failed before returning a valid envelope"
+          },
+          "graph_ref": null,
+          "graph_version": null,
+          "relevant_subgraph_ref": null,
+          "conventions": null,
+          "ran_diff_only": true
+        },
+        "consistency.$": "$.consistency",
+        "bugs.$": "$.bugs",
+        "fixes.$": "$.fixes",
+        "report.$": "$.report"
+      },
+      "Next": "ConsistencyChecker"
     },
     "ContextBuilder": {
       "Type": "Task",

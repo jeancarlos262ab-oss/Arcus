@@ -21,6 +21,7 @@ class PullRequestEvent:
     repo_full_name: str
     pr_number: int
     commit_sha: str
+    base_commit_sha: str
     installation_id: int
 
 
@@ -67,6 +68,7 @@ def parse_pull_request_event(
     pull_request = _required_mapping(payload, "pull_request")
     repository = _required_mapping(payload, "repository")
     head = _required_mapping(pull_request, "head")
+    base = _required_mapping(pull_request, "base")
     installation = _required_mapping(payload, "installation")
 
     repo_full_name = _required_string(repository, "full_name")
@@ -77,6 +79,7 @@ def parse_pull_request_event(
 
     pr_number = _required_positive_integer(pull_request, "number")
     commit_sha = _required_string(head, "sha")
+    base_commit_sha = _required_string(base, "sha")
     installation_id = _required_positive_integer(installation, "id")
 
     return PullRequestEvent(
@@ -84,6 +87,7 @@ def parse_pull_request_event(
         repo_full_name=repo_full_name,
         pr_number=pr_number,
         commit_sha=commit_sha,
+        base_commit_sha=base_commit_sha,
         installation_id=installation_id,
     )
 
