@@ -1,0 +1,15 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "arcus-stack"
+resolve_s3 = true
+s3_prefix = "arcus-stack"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+parameter_overrides = "Environment=\"dev\" BedrockModelId=\"us.amazon.nova-2-lite-v1:0\" BedrockFoundationModelId=\"amazon.nova-2-lite-v1:0\" GitHubAppId=\"123456\" AllowedRepositories=\"*\" AllowedInstallationIds=\"*\" ReviewsPerRepositoryDay=\"10\" ReviewsPerInstallationHour=\"5\" AdmissionTtlSeconds=\"7776000\" MaxWebhookBodyBytes=\"1048576\" SecretCacheTtlSeconds=\"300\" MaxOutputTokens=\"1200\" MaxPromptBytes=\"60000\" MaxFindingsPerStage=\"10\" MaxFindingsTotal=\"10\" MaxChangedFiles=\"50\" MaxDiffBytes=\"524288\" MaxEnvelopeBytes=\"240000\" MaxAiOperationsPerRun=\"3\" WebhookThrottleRate=\"1\" WebhookThrottleBurst=\"5\" ArtifactRetentionDays=\"14\" NoncurrentVersionRetentionDays=\"7\" DynamoMaxReadRequestUnits=\"20\" DynamoMaxWriteRequestUnits=\"20\" AlarmNotificationEmail=\"\""
+image_repositories = []
+disable_rollback = true
+region = "us-east-1"
+
+[default.global.parameters]
+region = "us-east-1"
