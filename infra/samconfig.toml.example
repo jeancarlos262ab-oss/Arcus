@@ -13,7 +13,6 @@ lint = true
 template_file = "infra/template.yaml"
 cached = true
 parallel = true
-beta_features = true
 
 [default.deploy.parameters]
 template_file = ".aws-sam/build/template.yaml"
@@ -37,7 +36,6 @@ lint = true
 template_file = "infra/template.yaml"
 cached = true
 parallel = true
-beta_features = true
 
 [demo.deploy.parameters]
 template_file = ".aws-sam/build/template.yaml"
