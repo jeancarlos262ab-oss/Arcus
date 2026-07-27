@@ -9,4 +9,15 @@ from arcus.storage.history import ReviewHistoryStore
 
 
 def test_probe() -> None:
-    assert all((BaseAgent, BedrockClient, Settings, S3ArtifactStore, ReviewHistoryStore, artifacts, model, settings))
+    assert all(
+        (
+            BaseAgent,
+            BedrockClient,
+            Settings,
+            S3ArtifactStore,
+            ReviewHistoryStore,
+            artifacts,
+            model,
+            settings,
+        )
+    )
