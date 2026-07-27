@@ -197,7 +197,7 @@ def mark_section_failed(
         }
     )
     if section_name == "context":
-        data["ran_diff_only"] = True
+        data["ran_diff_only"] = False
     failed = type(section).model_validate(data)
     setattr(envelope, section_name, failed)
 

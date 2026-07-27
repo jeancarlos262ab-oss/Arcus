@@ -29,13 +29,14 @@ envelope completo y devuelve el envelope completo + su contribución.
     "repo_full_name": "owner/repo",
     "pr_number": 42,
     "commit_sha": "abc123",
+    "base_commit_sha": "def456",
     "installation_id": 123456,
     "changed_files": ["src/a.py", "src/b.py"],
     "diff_ref": "s3://arcus-dev-context-artifacts/prs/owner/repo/42/diff.patch"
   },
   "context": {
     "status": "ok",
-    "graph_ref": "s3://arcus-dev-context-artifacts/graphs/owner/repo/main.json",
+    "graph_ref": "s3://arcus-dev-context-artifacts/graphs/owner/repo/commits/def456.json",
     "graph_version": "commit-def456",
     "relevant_subgraph_ref": "s3://.../prs/owner/repo/42/subgraph.json",
     "conventions": {

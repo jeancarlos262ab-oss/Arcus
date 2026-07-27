@@ -6,18 +6,14 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from time import perf_counter
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import (
-    BotoCoreError,
-    ClientError,
-    HTTPClientError,
-    IncompleteReadError,
-)
-from botocore.exceptions import ConnectionError as BotoConnectionError
 from pydantic import TypeAdapter, ValidationError
+
+if TYPE_CHECKING:
+    from botocore.exceptions import ClientError
 
 from arcus.config import Settings, get_settings
 from arcus.contracts import Finding, FixBatch
@@ -213,6 +209,14 @@ class BedrockClient:
     ) -> Mapping[str, object]:
         """Perform one SDK call and translate provider exceptions."""
 
+        from botocore.exceptions import (
+            BotoCoreError,
+            ClientError,
+            HTTPClientError,
+            IncompleteReadError,
+        )
+        from botocore.exceptions import ConnectionError as BotoConnectionError
+
         try:
             return self._runtime_client.converse(
                 modelId=model_id,
@@ -304,7 +308,8 @@ def parse_findings(text: str, *, max_findings: int = 10) -> list[Finding]:
         findings = TypeAdapter(list[Finding]).validate_python(findings_payload)
     except ValidationError as error:
         raise BedrockResponseError(
-            "Bedrock findings response failed contract validation"
+            "Bedrock findings response failed contract validation: "
+            f"{_summarize_validation_error(error)}"
         ) from error
     if len(findings) > max_findings:
         raise BedrockResponseError(
@@ -339,6 +344,55 @@ def _require_mapping(value: object, path: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise BedrockResponseError(f"Bedrock response field '{path}' must be an object")
     return cast(Mapping[str, object], value)
+
+
+def _summarize_validation_error(error: ValidationError) -> str:
+    """Return bounded validation paths and types without including model values."""
+
+    details: list[str] = []
+    for issue in error.errors():
+        location = _format_validation_location(issue.get("loc"))
+        error_type = issue.get("type")
+        if not isinstance(error_type, str):
+            error_type = "unknown"
+        details.append(f"{location}:{_safe_validation_token(error_type)}")
+        if len(details) == 3:
+            break
+
+    remaining = error.error_count() - len(details)
+    suffix = f"; +{remaining} more" if remaining > 0 else ""
+    return ", ".join(details) + suffix
+
+
+def _format_validation_location(location: object) -> str:
+    """Format a Pydantic path while keeping generated keys bounded and safe."""
+
+    if not isinstance(location, tuple):
+        return "findings"
+
+    formatted = "findings"
+    for part in location:
+        if isinstance(part, int) and part >= 0:
+            formatted += f"[{part}]"
+        elif isinstance(part, str):
+            formatted += f".{_safe_validation_token(part)}"
+        else:
+            formatted += ".field"
+    return formatted
+
+
+def _safe_validation_token(value: str) -> str:
+    """Keep validation diagnostics to short ASCII identifier-like tokens."""
+
+    safe_value = "".join(
+        character
+        if "a" <= character.lower() <= "z"
+        or "0" <= character <= "9"
+        or character in "._-"
+        else "_"
+        for character in value
+    )
+    return safe_value[:40] or "unknown"
 
 
 def _strip_code_fence(text: str) -> str:

@@ -14,6 +14,10 @@ DEFAULT_MAX_FINDINGS_PER_STAGE = 10
 DEFAULT_MAX_FINDINGS_TOTAL = 10
 DEFAULT_MAX_CHANGED_FILES = 50
 DEFAULT_MAX_DIFF_BYTES = 524_288
+DEFAULT_MAX_REPOSITORY_ARCHIVE_BYTES = 20_971_520
+DEFAULT_MAX_REPOSITORY_EXTRACTED_BYTES = 104_857_600
+DEFAULT_MAX_REPOSITORY_FILES = 5_000
+DEFAULT_MAX_GRAPH_BYTES = 5_242_880
 DEFAULT_MAX_ENVELOPE_BYTES = 240_000
 DEFAULT_MAX_AI_OPERATIONS_PER_RUN = 3
 
@@ -30,6 +34,10 @@ class Settings:
     max_findings_total: int = DEFAULT_MAX_FINDINGS_TOTAL
     max_changed_files: int = DEFAULT_MAX_CHANGED_FILES
     max_diff_bytes: int = DEFAULT_MAX_DIFF_BYTES
+    max_repository_archive_bytes: int = DEFAULT_MAX_REPOSITORY_ARCHIVE_BYTES
+    max_repository_extracted_bytes: int = DEFAULT_MAX_REPOSITORY_EXTRACTED_BYTES
+    max_repository_files: int = DEFAULT_MAX_REPOSITORY_FILES
+    max_graph_bytes: int = DEFAULT_MAX_GRAPH_BYTES
     max_envelope_bytes: int = DEFAULT_MAX_ENVELOPE_BYTES
     max_ai_operations_per_run: int = DEFAULT_MAX_AI_OPERATIONS_PER_RUN
 
@@ -43,6 +51,10 @@ class Settings:
             "max_findings_total": self.max_findings_total,
             "max_changed_files": self.max_changed_files,
             "max_diff_bytes": self.max_diff_bytes,
+            "max_repository_archive_bytes": self.max_repository_archive_bytes,
+            "max_repository_extracted_bytes": self.max_repository_extracted_bytes,
+            "max_repository_files": self.max_repository_files,
+            "max_graph_bytes": self.max_graph_bytes,
             "max_envelope_bytes": self.max_envelope_bytes,
             "max_ai_operations_per_run": self.max_ai_operations_per_run,
         }
@@ -111,6 +123,16 @@ def get_settings() -> Settings:
             "MAX_CHANGED_FILES", DEFAULT_MAX_CHANGED_FILES
         ),
         max_diff_bytes=_read_positive_int("MAX_DIFF_BYTES", DEFAULT_MAX_DIFF_BYTES),
+        max_repository_archive_bytes=_read_positive_int(
+            "MAX_REPOSITORY_ARCHIVE_BYTES", DEFAULT_MAX_REPOSITORY_ARCHIVE_BYTES
+        ),
+        max_repository_extracted_bytes=_read_positive_int(
+            "MAX_REPOSITORY_EXTRACTED_BYTES", DEFAULT_MAX_REPOSITORY_EXTRACTED_BYTES
+        ),
+        max_repository_files=_read_positive_int(
+            "MAX_REPOSITORY_FILES", DEFAULT_MAX_REPOSITORY_FILES
+        ),
+        max_graph_bytes=_read_positive_int("MAX_GRAPH_BYTES", DEFAULT_MAX_GRAPH_BYTES),
         max_envelope_bytes=_read_positive_int(
             "MAX_ENVELOPE_BYTES", DEFAULT_MAX_ENVELOPE_BYTES
         ),

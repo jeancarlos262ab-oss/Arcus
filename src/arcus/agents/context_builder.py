@@ -1,4 +1,4 @@
-"""Context Builder stage backed by canonical graph artifacts."""
+"""Context Builder agent Lambda."""
 
 from __future__ import annotations
 
@@ -6,22 +6,18 @@ import logging
 from functools import lru_cache
 
 from arcus.agents.base import BaseAgent
-from arcus.agents.runtime import artifacts, settings
+from arcus.agents.runtime import graph_artifacts, settings
 from arcus.config import Settings
-from arcus.contracts import (
-    AgentStatus,
-    ContextSection,
-    PipelineEnvelope,
-    RepoGraph,
-)
-from arcus.graph import extract_subgraph
+from arcus.contracts import AgentStatus, ContextSection, PipelineEnvelope, RepoGraph
+from arcus.graph.keys import repository_graph_key
+from arcus.graph.query import extract_subgraph
 from arcus.storage.artifacts import S3ArtifactStore
 
 logger = logging.getLogger(__name__)
 
 
 class ContextBuilderAgent(BaseAgent):
-    """Load a seeded repository graph and persist PR-specific context."""
+    """Load an automatically cached graph and persist PR-specific context."""
 
     section_name = "context"
     failure_code = "context_builder_failed"
@@ -40,11 +36,13 @@ class ContextBuilderAgent(BaseAgent):
         """Attach persisted graph references and detected conventions."""
 
         pr = envelope.pr
-        graph_key = f"graphs/{pr.repo_full_name}/main.json"
+        graph_key = repository_graph_key(pr.repo_full_name, pr.base_commit_sha)
         graph_ref = self._artifacts.reference(graph_key)
         graph = RepoGraph.model_validate(self._artifacts.get_json(graph_ref))
         if graph.repo != pr.repo_full_name:
             raise ValueError("repository graph does not match the pull request")
+        if graph.graph_version != pr.base_commit_sha:
+            raise ValueError("repository graph does not match the PR base commit")
 
         subgraph = extract_subgraph(graph, pr.changed_files, hops=1)
         subgraph_key = (
@@ -79,7 +77,7 @@ class ContextBuilderAgent(BaseAgent):
 def _agent() -> ContextBuilderAgent:
     """Reuse the stage and AWS clients across warm invocations."""
 
-    return ContextBuilderAgent(artifacts(), settings())
+    return ContextBuilderAgent(graph_artifacts(), settings())
 
 
 def lambda_handler(event: dict[str, object], _context: object) -> dict[str, object]:

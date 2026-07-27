@@ -7,6 +7,7 @@
     "pr_title": "Add configurable retry policy",
     "author": "octocat",
     "commit_sha": "abc123def4567890",
+    "base_commit_sha": "def456abc1237890",
     "installation_id": 123456,
     "changed_files": [],
     "diff_ref": null

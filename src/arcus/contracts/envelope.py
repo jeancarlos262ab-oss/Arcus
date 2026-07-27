@@ -39,6 +39,7 @@ class PullRequestMetadata(BaseModel):
     pr_title: str = ""
     author: str = ""
     commit_sha: str = Field(min_length=7)
+    base_commit_sha: str = Field(min_length=7)
     installation_id: int = Field(gt=0)
     changed_files: list[str] = Field(default_factory=list)
     diff_ref: str | None = None

@@ -129,8 +129,8 @@ cambiar una sola implementación de `DataSource`.
 
 ```
 arcus-{env}-context-artifacts/
-├── graphs/{owner}/{repo}/main.json          # grafo actual del branch base
-├── graphs/{owner}/{repo}/history/{sha}.json # snapshots por commit (opcional)
+├── graphs/{owner}/{repo}/commits/{base_sha}.json # grafo inmutable del commit base del PR
+├── graphs/{owner}/{repo}/main.json                # puntero de recuperacion administrativa
 ├── prs/{owner}/{repo}/{pr}/diff.patch        # diff del PR
 └── prs/{owner}/{repo}/{pr}/subgraph.json     # subgrafo relevante extraído
 ```

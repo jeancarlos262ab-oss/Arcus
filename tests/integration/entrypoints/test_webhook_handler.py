@@ -104,6 +104,7 @@ def test_signed_delivery_atomically_consumes_quota_and_starts_once(
         assert claim["ttl"] > int(datetime.now(UTC).timestamp())
         envelope = PipelineEnvelope.model_validate_json(claim["execution_input"])
         assert envelope.pr.repo_full_name == "acme/widgets"
+        assert envelope.pr.base_commit_sha == "def456abc1237890"
 
         day = datetime.now(UTC).strftime("%Y-%m-%d")
         hour = datetime.now(UTC).strftime("%Y-%m-%dT%H")

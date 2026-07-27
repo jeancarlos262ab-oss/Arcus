@@ -6,8 +6,6 @@ import os
 from functools import lru_cache
 from typing import Any, cast
 
-import boto3
-
 from arcus.config import get_settings
 from arcus.github.api import GitHubClient
 from arcus.github.app_auth import GitHubAppAuthenticator
@@ -26,6 +24,8 @@ def github_client() -> GitHubClient:
         app_id = int(raw_app_id)
     except ValueError as error:
         raise ValueError("GITHUB_APP_ID must be an integer") from error
+
+    import boto3
 
     boto3_module = cast(Any, boto3)
     secrets_client = cast(SecretsManagerClient, boto3_module.client("secretsmanager"))
@@ -47,4 +47,5 @@ def github_client() -> GitHubClient:
         api_base_url=api_base_url,
         max_changed_files=settings.max_changed_files,
         max_diff_bytes=settings.max_diff_bytes,
+        max_repository_archive_bytes=settings.max_repository_archive_bytes,
     )

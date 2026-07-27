@@ -453,6 +453,7 @@ def _build_execution_claim(
             pr_title=parsed_event.pr_title,
             author=parsed_event.author,
             commit_sha=parsed_event.commit_sha,
+            base_commit_sha=parsed_event.base_commit_sha,
             installation_id=parsed_event.installation_id,
         ),
     )

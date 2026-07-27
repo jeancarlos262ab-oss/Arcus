@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
-import boto3
 from botocore.config import Config
 
 from arcus.contracts import PipelineEnvelope
@@ -68,6 +67,8 @@ class ReviewHistoryStore:
         self._ttl_seconds = ttl_seconds
         self._clock = clock
         if client is None:
+            import boto3
+
             boto3_module = cast(Any, boto3)
             raw_client = boto3_module.client(
                 "dynamodb",

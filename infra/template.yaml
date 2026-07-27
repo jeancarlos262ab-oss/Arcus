@@ -74,6 +74,26 @@ Parameters:
     Type: Number
     Default: 524288
     MinValue: 1
+  MaxRepositoryArchiveBytes:
+    Type: Number
+    Default: 20971520
+    MinValue: 1
+    MaxValue: 52428800
+  MaxRepositoryExtractedBytes:
+    Type: Number
+    Default: 104857600
+    MinValue: 1
+    MaxValue: 536870912
+  MaxRepositoryFiles:
+    Type: Number
+    Default: 5000
+    MinValue: 1
+    MaxValue: 20000
+  MaxGraphBytes:
+    Type: Number
+    Default: 5242880
+    MinValue: 1
+    MaxValue: 20971520
   MaxEnvelopeBytes:
     Type: Number
     Default: 240000
@@ -138,6 +158,10 @@ Globals:
         MAX_FINDINGS_TOTAL: !Ref MaxFindingsTotal
         MAX_CHANGED_FILES: !Ref MaxChangedFiles
         MAX_DIFF_BYTES: !Ref MaxDiffBytes
+        MAX_REPOSITORY_ARCHIVE_BYTES: !Ref MaxRepositoryArchiveBytes
+        MAX_REPOSITORY_EXTRACTED_BYTES: !Ref MaxRepositoryExtractedBytes
+        MAX_REPOSITORY_FILES: !Ref MaxRepositoryFiles
+        MAX_GRAPH_BYTES: !Ref MaxGraphBytes
         MAX_ENVELOPE_BYTES: !Ref MaxEnvelopeBytes
         MAX_AI_OPERATIONS_PER_RUN: !Ref MaxAiOperationsPerRun
     Tags:
@@ -389,13 +413,52 @@ Resources:
               Action: s3:PutObject
               Resource: !Sub ${ContextArtifactsBucket.Arn}/prs/*
 
+  EnsureRepositoryGraphFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-ensure-repository-graph
+      Description: Lazily builds one bounded immutable graph for the PR base commit.
+      CodeUri: ../
+      Handler: arcus.entrypoints.ensure_repository_graph.lambda_handler
+      Timeout: 90
+      MemorySize: 1024
+      EphemeralStorage:
+        Size: 1024
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref GitHubAppId
+          GITHUB_APP_PRIVATE_KEY_SECRET_ARN: !Ref GitHubAppPrivateKeySecret
+          GITHUB_API_BASE_URL: https://api.github.com
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadGitHubPrivateKey
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref GitHubAppPrivateKeySecret
+            - Sid: ReadWriteVersionedRepositoryGraphs
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub ${ContextArtifactsBucket.Arn}/graphs/*
+            - Sid: CheckVersionedRepositoryGraphPresence
+              Effect: Allow
+              Action: s3:ListBucket
+              Resource: !GetAtt ContextArtifactsBucket.Arn
+              Condition:
+                StringLike:
+                  s3:prefix: graphs/*
+
   ContextBuilderFunction:
     Type: AWS::Serverless::Function
     Metadata:
       BuildMethod: python-uv
     Properties:
       FunctionName: !Sub arcus-${Environment}-agent-context-builder
-      Description: Loads the seeded repository graph and persists bounded PR context.
+      Description: Loads the base-commit repository graph and persists bounded PR context.
       CodeUri: ../
       Handler: arcus.agents.context_builder.lambda_handler
       Timeout: 45
@@ -592,6 +655,14 @@ Resources:
       LogGroupName: !Sub /aws/lambda/${FetchPRFunction}
       RetentionInDays: 14
 
+  EnsureRepositoryGraphLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${EnsureRepositoryGraphFunction}
+      RetentionInDays: 14
+
   ContextBuilderLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Delete
@@ -668,6 +739,7 @@ Resources:
                 Action: lambda:InvokeFunction
                 Resource:
                   - !GetAtt FetchPRFunction.Arn
+                  - !GetAtt EnsureRepositoryGraphFunction.Arn
                   - !GetAtt ContextBuilderFunction.Arn
                   - !GetAtt ConsistencyCheckerFunction.Arn
                   - !GetAtt BugHunterFunction.Arn
@@ -698,6 +770,7 @@ Resources:
       DefinitionUri: statemachine/pipeline.asl.json
       DefinitionSubstitutions:
         FetchPRFunctionArn: !GetAtt FetchPRFunction.Arn
+        EnsureRepositoryGraphFunctionArn: !GetAtt EnsureRepositoryGraphFunction.Arn
         ContextBuilderFunctionArn: !GetAtt ContextBuilderFunction.Arn
         ConsistencyCheckerFunctionArn: !GetAtt ConsistencyCheckerFunction.Arn
         BugHunterFunctionArn: !GetAtt BugHunterFunction.Arn
@@ -856,6 +929,8 @@ Outputs:
     Value: !Ref CostAlarmTopic
   FetchPRFunctionArn:
     Value: !GetAtt FetchPRFunction.Arn
+  EnsureRepositoryGraphFunctionArn:
+    Value: !GetAtt EnsureRepositoryGraphFunction.Arn
   ContextBuilderFunctionArn:
     Value: !GetAtt ContextBuilderFunction.Arn
   ConsistencyCheckerFunctionArn:

@@ -198,8 +198,9 @@ dashboard muestra la métrica.** Todo lo siguiente es recortable en orden de pri
    tiempo. Nada de filtros ni drill-down.
 4. **Modo diff-only elaborado (7.3).** Recorte: si no hay grafo, simplemente reportar el
    fallo del Context Builder; no hace falta un modo degradado sofisticado para la demo.
-5. **Snapshots históricos del grafo en S3.** Recorte: guardar solo `main.json`, sin
-   `history/{sha}.json`.
+5. **Snapshots históricos del grafo en S3.** El bootstrap perezoso guarda un grafo
+  inmutable por commit base en `commits/{sha}.json`; `main.json` queda solo como
+  puntero de recuperación administrativa.
 6. **Actualizar comentario existente (6.2).** Recorte: siempre crear comentario nuevo. En
    la demo se abre un PR fresco, así que no se nota.
 7. **Consistency Checker (Req 3) como agente separado.** Último recurso: si hay que elegir
