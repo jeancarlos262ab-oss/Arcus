@@ -1,8 +1,9 @@
 import { lazy, Suspense, useState } from "react";
-import { Menu, RefreshCw, TriangleAlert } from "lucide-react";
+import { Menu, Plug, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { Sidebar, type PageKey } from "@/components/Sidebar";
 import { PageSkeleton } from "@/components/PageSkeleton";
+import { ConnectRepoModal } from "@/components/ConnectRepoModal";
 
 import { ThemeProvider } from "@/state/ThemeProvider";
 import { StoreProvider, useStore } from "@/state/StoreProvider";
@@ -30,6 +31,7 @@ function Shell() {
   // El menú lateral es "off-canvas" por debajo del breakpoint `lg`: se abre/
   // cierra con este estado. En `lg+` el sidebar ignora `open` y siempre se ve.
   const [menuOpen, setMenuOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   return (
     <div className="min-h-screen">
@@ -68,10 +70,42 @@ function Shell() {
           </div>
         ) : loading ? (
           <PageSkeleton />
+        ) : page === "settings" ? (
+          // Ajustes siempre es accesible, incluso sin repos: ahí también se puede conectar uno.
+          <div key={page} className="animate-fade-in">
+            <Suspense fallback={<PageSkeleton />}>
+              <SettingsPage />
+            </Suspense>
+          </div>
         ) : repos.length === 0 ? (
-          <div className="panel p-6 text-sm text-muted">
-            Todavía no hay revisiones registradas. En cuanto el pipeline procese un PR de
-            GitHub, aparecerán aquí.
+          <div className="panel flex flex-col items-start gap-4 p-6">
+            <div>
+              <p className="text-sm font-semibold text-ink">
+                Todavía no hay repositorios conectados
+              </p>
+              <p className="mt-1 text-sm text-muted">
+                Sigue estos pasos para empezar a ver revisiones reales:
+              </p>
+            </div>
+            <ol className="w-full space-y-2 text-sm text-muted">
+              <li className="flex gap-2">
+                <span className="font-semibold text-ink">1.</span>
+                Instala la GitHub App de Arcus en el repositorio (requiere tu autorización
+                como dueño, directamente en GitHub).
+              </li>
+              <li className="flex gap-2">
+                <span className="font-semibold text-ink">2.</span>
+                Abre o actualiza un Pull Request en ese repositorio.
+              </li>
+              <li className="flex gap-2">
+                <span className="font-semibold text-ink">3.</span>
+                El pipeline lo procesa solo; en unos minutos aparece aquí.
+              </li>
+            </ol>
+            <button onClick={() => setConnectOpen(true)} className="btn-primary">
+              <Plug size={14} />
+              Conectar un repositorio
+            </button>
           </div>
         ) : (
           <div key={page} className="animate-fade-in">
@@ -80,7 +114,6 @@ function Shell() {
               {page === "activity" && <ActivityPage />}
               {page === "graph" && <GraphPage />}
               {page === "findings" && <FindingsPage />}
-              {page === "settings" && <SettingsPage />}
             </Suspense>
           </div>
         )}
@@ -90,6 +123,8 @@ function Shell() {
           <span>Arcus · Repo Health Dashboard</span>
         </footer>
       </main>
+
+      <ConnectRepoModal open={connectOpen} onClose={() => setConnectOpen(false)} />
     </div>
   );
 }

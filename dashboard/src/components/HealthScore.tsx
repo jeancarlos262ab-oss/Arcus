@@ -2,7 +2,8 @@ import { memo } from "react";
 import { useTheme } from "@/state/ThemeProvider";
 
 interface HealthScoreProps {
-  score: number; // 0-100
+  /** 0-100, o null cuando el repo no tiene ninguna revisión en el rango. */
+  score: number | null;
 }
 
 /** Anillo de puntaje de salud del repo (SVG puro, adaptado al tema). */
@@ -13,11 +14,18 @@ export const HealthScore = memo(function HealthScore({ score }: HealthScoreProps
   const radius = 50;
   const stroke = 10;
   const circ = 2 * Math.PI * radius;
-  const clamped = Math.max(0, Math.min(100, score));
+  const hasData = score !== null;
+  const clamped = hasData ? Math.max(0, Math.min(100, score)) : 0;
   const offset = circ - (clamped / 100) * circ;
 
-  const color = clamped >= 75 ? p.success : clamped >= 50 ? p.medium : p.high;
-  const label = clamped >= 75 ? "Saludable" : clamped >= 50 ? "Aceptable" : "Necesita atención";
+  const color = !hasData ? p.faint : clamped >= 75 ? p.success : clamped >= 50 ? p.medium : p.high;
+  const label = !hasData
+    ? "Sin datos todavía"
+    : clamped >= 75
+      ? "Saludable"
+      : clamped >= 50
+        ? "Aceptable"
+        : "Necesita atención";
 
   return (
     <div className="flex flex-col items-center">
@@ -31,22 +39,26 @@ export const HealthScore = memo(function HealthScore({ score }: HealthScoreProps
             stroke={p.border}
             strokeWidth={stroke}
           />
-          <circle
-            cx={center}
-            cy={center}
-            r={radius}
-            fill="none"
-            stroke={color}
-            strokeWidth={stroke}
-            strokeLinecap="round"
-            strokeDasharray={circ}
-            strokeDashoffset={offset}
-            transform={`rotate(-90 ${center} ${center})`}
-            style={{ transition: "stroke-dashoffset 0.8s ease" }}
-          />
+          {hasData && (
+            <circle
+              cx={center}
+              cy={center}
+              r={radius}
+              fill="none"
+              stroke={color}
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={circ}
+              strokeDashoffset={offset}
+              transform={`rotate(-90 ${center} ${center})`}
+              style={{ transition: "stroke-dashoffset 0.8s ease" }}
+            />
+          )}
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-3xl font-extrabold tracking-tight text-ink">{clamped}</span>
+          <span className="text-3xl font-extrabold tracking-tight text-ink">
+            {hasData ? clamped : "–"}
+          </span>
           <span className="text-[0.65rem] font-semibold uppercase tracking-wider text-faint">
             / 100
           </span>

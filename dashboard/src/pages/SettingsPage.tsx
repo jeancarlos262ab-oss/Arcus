@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Plug, RefreshCw, Trash2, X } from "lucide-react";
 
 import { Header } from "@/components/Header";
 import { Panel } from "@/components/Panel";
+import { ConnectRepoModal } from "@/components/ConnectRepoModal";
 import { ThemePreviewCard } from "@/components/ui/ThemePreview";
 import { useStore } from "@/state/StoreProvider";
 import { useTheme } from "@/state/ThemeProvider";
@@ -17,8 +18,9 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
 /** Pantalla de ajustes: apariencia y configuración del backend (solo lectura). */
 export function SettingsPage() {
   const { mode, setMode } = useTheme();
-  const { repos, settings, selectedRepo, refresh } = useStore();
+  const { repos, settings, selectedRepo, refresh, removeRepo, disconnectAll } = useStore();
   const [refreshed, setRefreshed] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   return (
     <>
@@ -72,11 +74,16 @@ export function SettingsPage() {
           </div>
         </Panel>
 
-        {/* Repositorios (solo lectura: derivados de DynamoDB) */}
-        <Panel title="Repositorios" subtitle="Repos con historial en DynamoDB">
+        {/* Repositorios: los que ya tienen historial + una watchlist local */}
+        <Panel title="Repositorios" subtitle="Repos visibles en el dashboard">
+          <button onClick={() => setConnectOpen(true)} className="btn-primary mb-3 w-full justify-center">
+            <Plug size={14} />
+            Conectar un repositorio
+          </button>
+
           <div className="space-y-1.5">
             {repos.length === 0 ? (
-              <p className="text-sm text-muted">Aún no hay repositorios con revisiones.</p>
+              <p className="text-sm text-muted">Aún no hay repositorios conectados.</p>
             ) : (
               repos.map((repo) => (
                 <div
@@ -84,16 +91,37 @@ export function SettingsPage() {
                   className="flex items-center justify-between rounded-lg border border-border bg-bg px-3 py-2"
                 >
                   <span className="font-mono text-sm text-ink">{repo}</span>
+                  <button
+                    onClick={() => removeRepo(repo)}
+                    className="focus-ring grid h-6 w-6 place-items-center rounded-md text-faint hover:bg-surface-2 hover:text-ink"
+                    aria-label={`Quitar ${repo} de la lista`}
+                    title="Quitar de la lista"
+                  >
+                    <X size={13} />
+                  </button>
                 </div>
               ))
             )}
           </div>
+
+          {repos.length > 0 && (
+            <button
+              onClick={disconnectAll}
+              className="btn-ghost mt-3 w-full justify-center text-red-500"
+            >
+              <Trash2 size={14} />
+              Desconectar todo
+            </button>
+          )}
           <p className="mt-3 text-[0.72rem] text-faint">
-            Esta lista se deriva de las revisiones que el pipeline ya procesó; los repos se
-            agregan automáticamente al abrir un PR en un repositorio con la GitHub App
-            instalada.
+            Los repos con revisiones reales aparecen automáticamente en cuanto el pipeline
+            procese su primer PR. "Desconectar todo" deja el dashboard como recién instalado
+            en este navegador; no desinstala la GitHub App ni borra el historial ya guardado
+            en DynamoDB. Vuelve a aparecer todo en cuanto conectes un repositorio.
           </p>
         </Panel>
+
+        <ConnectRepoModal open={connectOpen} onClose={() => setConnectOpen(false)} />
 
         {/* Datos */}
         <Panel title="Datos" subtitle="Sincronización con el backend">

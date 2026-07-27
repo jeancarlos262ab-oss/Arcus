@@ -30,6 +30,7 @@ export function GraphPage() {
   const [graph, setGraph] = useState<RepoGraph>(EMPTY_GRAPH);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
@@ -37,6 +38,7 @@ export function GraphPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setNotFound(false);
     fetchGraph(selectedRepo)
       .then((data) => {
         if (!cancelled) setGraph(data);
@@ -44,11 +46,19 @@ export function GraphPage() {
       .catch((err: unknown) => {
         if (cancelled) return;
         setGraph(EMPTY_GRAPH);
-        setError(
-          err instanceof ApiRequestError
-            ? err.message
-            : "No se pudo cargar el grafo de contexto para este repositorio.",
-        );
+        if (err instanceof ApiRequestError && err.status === 404) {
+          // Esperado: el Context Builder aún no generó el grafo de este repo
+          // (sin revisiones procesadas todavía, o corrió en modo diff-only).
+          setNotFound(true);
+          setError(null);
+        } else {
+          setNotFound(false);
+          setError(
+            err instanceof ApiRequestError
+              ? err.message
+              : "No se pudo cargar el grafo de contexto para este repositorio.",
+          );
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -95,7 +105,24 @@ export function GraphPage() {
         subtitle="Mapa persistente del repo: módulos, símbolos y sus relaciones"
       />
 
-      {error ? (
+      {notFound ? (
+        <Panel className="mb-4">
+          <div className="flex flex-col items-start gap-3 py-4">
+            <div className="flex items-center gap-2 text-muted">
+              <Workflow size={18} />
+              <span className="font-semibold text-ink">Aún no hay grafo de contexto</span>
+            </div>
+            <p className="text-sm text-muted">
+              Este repositorio todavía no tiene un grafo generado. Se crea automáticamente
+              cuando el pipeline procesa con éxito su primera revisión.
+            </p>
+            <button onClick={() => setRetryToken((t) => t + 1)} className="btn-ghost">
+              <RefreshCw size={14} />
+              Reintentar
+            </button>
+          </div>
+        </Panel>
+      ) : error ? (
         <Panel className="mb-4">
           <div className="flex flex-col items-start gap-3 py-4">
             <div className="flex items-center gap-2 text-high">

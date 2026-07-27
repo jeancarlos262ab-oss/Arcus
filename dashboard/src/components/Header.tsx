@@ -1,6 +1,8 @@
-import { Github } from "lucide-react";
+import { useState } from "react";
+import { Github, Plus } from "lucide-react";
 import type { RangeKey } from "@/state/StoreProvider";
 import { ThemeToggle } from "./ThemeToggle";
+import { ConnectRepoModal } from "./ConnectRepoModal";
 
 interface HeaderProps {
   repo: string;
@@ -20,6 +22,8 @@ const RANGES: { key: RangeKey; label: string }[] = [
 /** Cabecera de página: contexto del repo, rango, tema y acciones. */
 export function Header({ repo, title, subtitle, rangeKey, onRangeChange }: HeaderProps) {
   const owner = repo.split("/")[0] ?? "";
+  const [connectOpen, setConnectOpen] = useState(false);
+
   return (
     <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
@@ -47,8 +51,14 @@ export function Header({ repo, title, subtitle, rangeKey, onRangeChange }: Heade
             ))}
           </div>
         )}
+        <button onClick={() => setConnectOpen(true)} className="btn-primary">
+          <Plus size={14} />
+          Conectar repo
+        </button>
         <ThemeToggle />
       </div>
+
+      <ConnectRepoModal open={connectOpen} onClose={() => setConnectOpen(false)} />
     </header>
   );
 }

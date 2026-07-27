@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
 from botocore.config import Config
+from pydantic import ValidationError
 
 from arcus.contracts import PipelineEnvelope
+
+logger = logging.getLogger(__name__)
 
 _REPO_INDEX_PK = "REPOS"
 
@@ -161,13 +165,29 @@ def _items(response: Mapping[str, object]) -> list[Mapping[str, object]]:
 
 
 def _to_record(item: Mapping[str, object]) -> ReviewRecord | None:
-    """Validate one persisted review row, skipping malformed history rows."""
+    """Validate one persisted review row, skipping malformed history rows.
+
+    Rows written before a contract change (e.g. a newly required field on
+    ``PullRequestMetadata``) can fail validation against the current schema.
+    Such rows are logged and skipped rather than failing the whole read, so
+    one legacy row never takes down the dashboard for an entire repository.
+    """
 
     payload = _string_attribute(item, "payload")
     completed_at_raw = _string_attribute(item, "completed_at")
     if payload is None:
         return None
-    envelope = PipelineEnvelope.model_validate_json(payload)
+    try:
+        envelope = PipelineEnvelope.model_validate_json(payload)
+    except ValidationError:
+        logger.warning(
+            "history_row_schema_mismatch",
+            extra={
+                "pk": _string_attribute(item, "pk"),
+                "sk": _string_attribute(item, "sk"),
+            },
+        )
+        return None
     completed_at = (
         datetime.fromisoformat(completed_at_raw)
         if completed_at_raw is not None

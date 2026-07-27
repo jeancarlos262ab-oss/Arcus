@@ -20,19 +20,21 @@ interface RepoPreviewCardProps {
  * visual (sigue siendo una sola línea de texto).
  */
 export function RepoPreviewCard({ name, summary, active, onClick }: RepoPreviewCardProps) {
-  const score = summary?.healthScore ?? 100;
+  const score = summary?.healthScore ?? null;
+  const dotColor = active ? "var(--accent)" : score === null ? "var(--faint)" : healthColor(score);
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
+      title={score === null ? "Sin revisiones todavía" : `Salud: ${score}%`}
       className={`focus-ring flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
         active ? "bg-accent/10 font-semibold text-accent" : "text-muted hover:bg-surface-2 hover:text-ink"
       }`}
     >
       <span
         className="h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{ background: active ? "var(--accent)" : healthColor(score) }}
+        style={{ background: dotColor, opacity: score === null && !active ? 0.5 : 1 }}
       />
       <span className="truncate">{name}</span>
     </button>

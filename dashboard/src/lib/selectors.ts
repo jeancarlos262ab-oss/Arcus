@@ -19,11 +19,13 @@ export interface OverviewMetrics {
   avgFindingsPerPr: number;
   highSeverity: number;
   fixCoverage: number;
-  pipelineReliability: number;
+  /** null cuando no hay corridas en el rango: no hay pipeline que medir. */
+  pipelineReliability: number | null;
   avgDurationS: number;
   deltaReviews: number;
   deltaFindings: number;
-  healthScore: number;
+  /** null cuando no hay corridas en el rango: no confundir "sin datos" con "perfecto". */
+  healthScore: number | null;
 }
 
 export interface TimePoint {
@@ -89,11 +91,27 @@ export function computeOverview(
     totalReviews > 0 ? runs.reduce((s, r) => s + r.duration_s, 0) / totalReviews : 0;
 
   const prevFindings = prevRuns.reduce((s, r) => s + r.findings_summary.total, 0);
-  const avgFindingsPerPr = totalReviews > 0 ? totalFindings / totalReviews : 0;
-  const pipelineReliability = totalReviews > 0 ? (reliableRuns / totalReviews) * 100 : 100;
+
+  if (totalReviews === 0) {
+    return {
+      totalReviews: 0,
+      totalFindings: 0,
+      avgFindingsPerPr: 0,
+      highSeverity: 0,
+      fixCoverage: Math.round(fixCoveragePct),
+      pipelineReliability: null,
+      avgDurationS: 0,
+      deltaReviews: -prevRuns.length,
+      deltaFindings: -prevFindings,
+      healthScore: null,
+    };
+  }
+
+  const avgFindingsPerPr = totalFindings / totalReviews;
+  const pipelineReliability = (reliableRuns / totalReviews) * 100;
 
   const densityPenalty = Math.min(avgFindingsPerPr * 6, 55);
-  const highPenalty = Math.min((highSeverity / Math.max(totalReviews, 1)) * 14, 25);
+  const highPenalty = Math.min((highSeverity / totalReviews) * 14, 25);
   const reliabilityBonus = (pipelineReliability / 100) * 12;
   const healthScore = Math.round(
     Math.max(0, Math.min(100, 88 - densityPenalty - highPenalty + reliabilityBonus)),
@@ -166,15 +184,18 @@ export function typeTotals(runs: ReviewRun[]): Record<FindingType, number> {
 
 export interface RepoHealthSummary {
   repo: string;
-  healthScore: number;
+  /** null cuando el repo no tiene ninguna revisión real todavía (no confundir con 100). */
+  healthScore: number | null;
   totalFindings: number;
   bySeverity: Record<Severity, number>;
+  hasData: boolean;
 }
 
 /**
  * Salud resumida por repo (últimos 30 días), para previsualizaciones donde no
  * hay espacio para el detalle completo de `computeOverview` (p. ej. el
- * selector de repos del sidebar).
+ * selector de repos del sidebar). `healthScore` es `null` sin datos: un repo
+ * recién conectado no es "perfecto", simplemente no tiene revisiones aún.
  */
 export function repoHealthSummaries(runs: ReviewRun[], repos: string[]): RepoHealthSummary[] {
   const { range } = rangeFromKey("30d");
@@ -182,16 +203,25 @@ export function repoHealthSummaries(runs: ReviewRun[], repos: string[]): RepoHea
     const scoped = filterRuns(runs, repo, range);
     const bySeverity = severityTotals(scoped);
     const totalFindings = bySeverity.high + bySeverity.medium + bySeverity.low;
-    const avgFindingsPerPr = scoped.length > 0 ? totalFindings / scoped.length : 0;
+    const hasData = scoped.length > 0;
+    if (!hasData) {
+      return { repo, healthScore: null, totalFindings, bySeverity, hasData };
+    }
+    const avgFindingsPerPr = totalFindings / scoped.length;
     const densityPenalty = Math.min(avgFindingsPerPr * 6, 55);
-    const highPenalty = Math.min((bySeverity.high / Math.max(scoped.length, 1)) * 14, 25);
+    const highPenalty = Math.min((bySeverity.high / scoped.length) * 14, 25);
     const healthScore = Math.round(Math.max(0, Math.min(100, 88 - densityPenalty - highPenalty)));
-    return { repo, healthScore, totalFindings, bySeverity };
+    return { repo, healthScore, totalFindings, bySeverity, hasData };
   });
 }
 
-/** Fiabilidad por agente: % de corridas donde cada agente terminó en ok. */
-export function agentReliability(runs: ReviewRun[]): { agent: string; ok: number }[] {
+/**
+ * Fiabilidad por agente: % de corridas donde cada agente terminó en ok.
+ * `ok` es null sin corridas: no hay pipeline que medir, no es "100% fiable".
+ */
+export function agentReliability(
+  runs: ReviewRun[],
+): { agent: string; ok: number | null }[] {
   const agents = ["context", "consistency", "bugs", "fixes", "report"] as const;
   const labels: Record<string, string> = {
     context: "Context Builder",
@@ -201,10 +231,8 @@ export function agentReliability(runs: ReviewRun[]): { agent: string; ok: number
     report: "Reporter",
   };
   return agents.map((a) => {
+    if (runs.length === 0) return { agent: labels[a], ok: null };
     const okCount = runs.filter((r) => r.agent_status[a] === "ok").length;
-    return {
-      agent: labels[a],
-      ok: runs.length > 0 ? Math.round((okCount / runs.length) * 100) : 100,
-    };
+    return { agent: labels[a], ok: Math.round((okCount / runs.length) * 100) };
   });
 }

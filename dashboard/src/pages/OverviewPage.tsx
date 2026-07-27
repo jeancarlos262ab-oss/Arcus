@@ -96,9 +96,13 @@ export function OverviewPage() {
         />
         <KpiCard
           label="Fiabilidad pipeline"
-          value={`${overview.pipelineReliability}%`}
+          value={overview.pipelineReliability === null ? "–" : `${overview.pipelineReliability}%`}
           icon={ShieldCheck}
-          delta={`${overview.avgDurationS}s de duración media`}
+          delta={
+            overview.totalReviews > 0
+              ? `${overview.avgDurationS}s de duración media`
+              : "Sin revisiones en este rango"
+          }
           trend="flat"
         />
       </div>
