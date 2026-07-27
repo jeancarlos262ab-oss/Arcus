@@ -24,7 +24,7 @@ region = "us-east-1"
 confirm_changeset = true
 fail_on_empty_changeset = false
 capabilities = "CAPABILITY_NAMED_IAM"
-parameter_overrides = "Environment=dev BedrockModelId=us.amazon.nova-2-lite-v1:0 BedrockFoundationModelId=amazon.nova-2-lite-v1:0 GitHubAppId=123456 AllowedRepositories=* AllowedInstallationIds=* ReviewsPerRepositoryDay=10 ReviewsPerInstallationHour=5"
+parameter_overrides = "Environment=dev BedrockModelId=us.amazon.nova-2-lite-v1:0 BedrockFoundationModelId=amazon.nova-2-lite-v1:0 GitHubAppId=123456 AllowedRepositories=* AllowedInstallationIds=* ReviewsPerRepositoryDay=10 ReviewsPerInstallationHour=5 MaxOutputTokens=2400"
 
 [demo.global.parameters]
 region = "us-east-1"
@@ -48,4 +48,4 @@ region = "us-east-1"
 confirm_changeset = true
 fail_on_empty_changeset = false
 capabilities = "CAPABILITY_NAMED_IAM"
-parameter_overrides = "Environment=demo BedrockModelId=us.amazon.nova-2-lite-v1:0 BedrockFoundationModelId=amazon.nova-2-lite-v1:0 GitHubAppId=123456 AllowedRepositories=* AllowedInstallationIds=* ReviewsPerRepositoryDay=30 ReviewsPerInstallationHour=5"
+parameter_overrides = "Environment=demo BedrockModelId=us.amazon.nova-2-lite-v1:0 BedrockFoundationModelId=amazon.nova-2-lite-v1:0 GitHubAppId=123456 AllowedRepositories=* AllowedInstallationIds=* ReviewsPerRepositoryDay=30 ReviewsPerInstallationHour=5 MaxOutputTokens=2400"

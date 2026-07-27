@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable, Mapping
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Protocol, cast
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import boto3
 from botocore.config import Config
@@ -15,7 +16,7 @@ from pydantic import TypeAdapter, ValidationError
 if TYPE_CHECKING:
     from botocore.exceptions import ClientError
 
-from arcus.config import Settings, get_settings
+from arcus.config import DEFAULT_MAX_OUTPUT_TOKENS, Settings, get_settings
 from arcus.contracts import Finding, FixBatch
 from arcus.errors import BedrockResponseError, PermanentError, TransientError
 from arcus.retry import RetryPolicy, call_with_retries
@@ -119,7 +120,7 @@ class BedrockClient:
         prompt: str,
         *,
         model_id: str | None = None,
-        max_tokens: int = 1200,
+        max_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
         temperature: float = 0.0,
     ) -> str:
         """Invoke Converse after enforcing prompt and output-token budgets.
@@ -178,6 +179,7 @@ class BedrockClient:
         )
         text = extract_text(response)
         usage = _extract_usage(response)
+        stop_reason = _extract_stop_reason(response)
         logger.info(
             "bedrock_converse_completed",
             extra={
@@ -185,8 +187,13 @@ class BedrockClient:
                 "latency_ms": round((perf_counter() - started_at) * 1000, 2),
                 "input_tokens": usage[0],
                 "output_tokens": usage[1],
+                "stop_reason": stop_reason,
             },
         )
+        if stop_reason == "max_tokens":
+            raise BedrockResponseError(
+                "Bedrock response reached the max output token limit"
+            )
         return text
 
     def parse_findings(self, text: str) -> list[Finding]:
@@ -281,7 +288,10 @@ def parse_json_response(text: str) -> object:
     try:
         parsed: object = json.loads(cleaned)
     except json.JSONDecodeError as error:
-        raise BedrockResponseError("Bedrock response was not valid JSON") from error
+        embedded = _extract_embedded_json(cleaned)
+        if embedded is None:
+            raise BedrockResponseError("Bedrock response was not valid JSON") from error
+        parsed = embedded
     if isinstance(parsed, dict):
         return cast(dict[str, object], parsed)
     if isinstance(parsed, list):
@@ -303,6 +313,7 @@ def parse_findings(text: str, *, max_findings: int = 10) -> list[Finding]:
                 "Bedrock findings response is missing 'findings'"
             )
         findings_payload = parsed_mapping["findings"]
+    findings_payload = _normalise_finding_ids(findings_payload)
 
     try:
         findings = TypeAdapter(list[Finding]).validate_python(findings_payload)
@@ -344,6 +355,66 @@ def _require_mapping(value: object, path: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise BedrockResponseError(f"Bedrock response field '{path}' must be an object")
     return cast(Mapping[str, object], value)
+
+
+def _extract_embedded_json(text: str) -> object | None:
+    """Recover one complete JSON object or array surrounded by model prose."""
+
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(text):
+        if character not in "[{":
+            continue
+        try:
+            parsed, _end = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, (dict, list)):
+            return parsed
+    return None
+
+
+def _normalise_finding_ids(payload: object) -> object:
+    """Replace model labels with UUIDs when an ID is missing or invalid."""
+
+    if not isinstance(payload, list):
+        return payload
+
+    normalised: list[object] = []
+    used_ids: set[UUID] = set()
+    for index, item in enumerate(payload):
+        if not isinstance(item, Mapping):
+            normalised.append(item)
+            continue
+
+        candidate = dict(item)
+        finding_id = _read_uuid(candidate.get("id"))
+        if finding_id is None or finding_id in used_ids:
+            finding_id = _generated_finding_id(candidate, index)
+            while finding_id in used_ids:
+                finding_id = uuid5(NAMESPACE_URL, f"{finding_id}:{index}")
+            candidate["id"] = str(finding_id)
+        used_ids.add(finding_id)
+        normalised.append(candidate)
+    return normalised
+
+
+def _read_uuid(value: object) -> UUID | None:
+    """Read a UUID string from untrusted model output."""
+
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
+def _generated_finding_id(finding: Mapping[str, object], index: int) -> UUID:
+    """Create a repeatable finding identity without trusting model-generated IDs."""
+
+    identity = {key: value for key, value in finding.items() if key != "id"}
+    canonical = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return uuid5(NAMESPACE_URL, f"arcus:finding:{index}:{canonical}")
 
 
 def _summarize_validation_error(error: ValidationError) -> str:
@@ -465,3 +536,10 @@ def _extract_usage(response: Mapping[str, object]) -> tuple[int | None, int | No
         input_tokens if isinstance(input_tokens, int) else None,
         output_tokens if isinstance(output_tokens, int) else None,
     )
+
+
+def _extract_stop_reason(response: Mapping[str, object]) -> str | None:
+    """Read the provider completion reason without logging model content."""
+
+    stop_reason = response.get("stopReason")
+    return stop_reason if isinstance(stop_reason, str) else None
