@@ -124,7 +124,7 @@ Las escrituras (comentario en el PR, fila en DynamoDB) son idempotentes ante rei
 - **pytest** + **pytest-mock**, **moto** (mock de S3/DynamoDB), **responses** (mock de la GitHub API). Bedrock siempre mockeado en CI.
 
 **Dashboard**
-- **React + Vite + TypeScript + Tailwind CSS + Recharts** (SPA de solo lectura).
+- **React 18 + Vite 5 + TypeScript + Tailwind CSS + Recharts** (SPA de solo lectura). Documentación propia en [`dashboard/README.md`](dashboard/README.md) ([English](dashboard/README.en.md)).
 
 ---
 
@@ -136,7 +136,10 @@ arcus/
 │   ├── template.yaml           # Recursos: Lambdas, Step Functions, API GW, IAM, S3, DynamoDB
 │   ├── statemachine/
 │   │   └── pipeline.asl.json   # Definición de la máquina de estados (Amazon States Language)
-│   └── samconfig.toml.example  # Parámetros de despliegue por entorno (no secretos)
+│   ├── env/                    # Parámetros por entorno (dev.json, demo.json)
+│   ├── stubs/                  # Handlers de relleno para etapas aún en desarrollo
+│   ├── samconfig.toml.example  # Parámetros de despliegue por entorno (no secretos)
+│   └── README.md               # Notas específicas de infraestructura
 │
 ├── src/arcus/
 │   ├── contracts/              # Modelos Pydantic compartidos (envelope, findings, graph)
@@ -149,15 +152,19 @@ arcus/
 │   ├── config.py               # Carga de configuración desde variables de entorno
 │   └── logging.py              # Logging estructurado JSON
 │
-├── dashboard/                  # SPA React + Vite (solo lectura)
+├── dashboard/                  # SPA React + Vite (solo lectura) — ver dashboard/README.md
+├── docs/                       # Diagramas (architecture.svg / architecture.en.svg)
 ├── tests/
 │   ├── unit/                   # Lógica pura y determinista
 │   ├── integration/            # Costuras críticas (moto, responses)
 │   └── fixtures/               # Envelopes, grafos, PRs y webhooks de ejemplo
-├── scripts/                    # Utilidades locales (seed de grafo, replay de webhook)
+├── scripts/                    # Utilidades locales (seed_graph.py, replay_webhook.py)
+├── .github/workflows/ci.yml    # CI: build del dashboard + checks del backend
 ├── requirements.txt            # Dependencias de runtime para el empaquetado SAM (generado desde uv.lock)
 ├── pyproject.toml              # Proyecto, dependencias y configuración de tooling
-└── uv.lock                     # Lockfile versionado para builds reproducibles
+├── uv.lock                     # Lockfile versionado para builds reproducibles
+├── samconfig.toml              # Configuración local de despliegue SAM
+└── README.md · README.en.md    # Este documento (español / inglés)
 ```
 
 **Principios de organización**
@@ -276,3 +283,13 @@ cada agente** (que consumen un envelope de fixture y validan el de salida contra
 Pydantic) son innegociables, porque el envelope es el punto de integración entre frentes.
 El LLM se mockea siempre en CI y las pruebas verifican el *parsing* y el *flujo*, nunca el
 texto exacto del modelo.
+
+### Integración continua
+
+El workflow de GitHub Actions (`.github/workflows/ci.yml`) se ejecuta en cada push y pull
+request con dos jobs:
+
+- **Dashboard** — `npm ci` + `npm run build` (Node.js 20).
+- **Backend** — `uv sync --locked --dev`, `ruff format --check`, `ruff check`, `mypy` sobre
+  los módulos de borde (`contracts`, `graph`, `github`), tests unitarios, de contrato e de
+  integración, `uv build`, y finalmente `sam validate --lint` + `sam build` de la plantilla.

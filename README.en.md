@@ -124,7 +124,7 @@ stages did not complete. Writes (PR comment, DynamoDB row) are idempotent across
 - **pytest** + **pytest-mock**, **moto** (S3/DynamoDB mocks), **responses** (GitHub API mocks). Bedrock is always mocked in CI.
 
 **Dashboard**
-- **React + Vite + TypeScript + Tailwind CSS + Recharts** (read-only SPA).
+- **React 18 + Vite 5 + TypeScript + Tailwind CSS + Recharts** (read-only SPA). Its own docs live in [`dashboard/README.en.md`](dashboard/README.en.md) ([Español](dashboard/README.md)).
 
 ---
 
@@ -136,7 +136,10 @@ arcus/
 │   ├── template.yaml           # Resources: Lambdas, Step Functions, API GW, IAM, S3, DynamoDB
 │   ├── statemachine/
 │   │   └── pipeline.asl.json   # State machine definition (Amazon States Language)
-│   └── samconfig.toml.example  # Per-environment deploy parameters (non-secret)
+│   ├── env/                    # Per-environment parameters (dev.json, demo.json)
+│   ├── stubs/                  # Placeholder handlers for stages still in development
+│   ├── samconfig.toml.example  # Per-environment deploy parameters (non-secret)
+│   └── README.md               # Infrastructure-specific notes
 │
 ├── src/arcus/
 │   ├── contracts/              # Shared Pydantic models (envelope, findings, graph)
@@ -149,15 +152,19 @@ arcus/
 │   ├── config.py               # Configuration loading from environment variables
 │   └── logging.py              # Structured JSON logging
 │
-├── dashboard/                  # React + Vite SPA (read-only)
+├── dashboard/                  # React + Vite SPA (read-only) — see dashboard/README.en.md
+├── docs/                       # Diagrams (architecture.svg / architecture.en.svg)
 ├── tests/
 │   ├── unit/                   # Pure, deterministic logic
 │   ├── integration/            # Critical seams (moto, responses)
 │   └── fixtures/               # Sample envelopes, graphs, PRs, and webhooks
-├── scripts/                    # Local utilities (graph seed, webhook replay)
+├── scripts/                    # Local utilities (seed_graph.py, replay_webhook.py)
+├── .github/workflows/ci.yml    # CI: dashboard build + backend checks
 ├── requirements.txt            # Runtime dependencies for SAM packaging (generated from uv.lock)
 ├── pyproject.toml              # Project, dependencies, and tooling configuration
-└── uv.lock                     # Versioned lockfile for reproducible builds
+├── uv.lock                     # Versioned lockfile for reproducible builds
+├── samconfig.toml              # Local SAM deployment configuration
+└── README.md · README.en.md    # This document (Spanish / English)
 ```
 
 **Organization principles**
@@ -277,3 +284,13 @@ The testing strategy prioritizes protecting the demo flow: each agent's **contra
 non-negotiable, because the envelope is the integration point across work streams. The LLM
 is always mocked in CI and the tests verify *parsing* and *flow*, never the model's exact
 text.
+
+### Continuous integration
+
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and pull
+request with two jobs:
+
+- **Dashboard** — `npm ci` + `npm run build` (Node.js 20).
+- **Backend** — `uv sync --locked --dev`, `ruff format --check`, `ruff check`, `mypy` over
+  the boundary modules (`contracts`, `graph`, `github`), unit / contract / integration
+  tests, `uv build`, and finally `sam validate --lint` + `sam build` of the template.
