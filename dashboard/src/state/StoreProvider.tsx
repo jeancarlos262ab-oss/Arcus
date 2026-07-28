@@ -184,10 +184,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return { ok: false, error: "El repositorio ya está en tu lista." };
       }
       const saved = await saveMyWatchlist([...state.watchlist, name]);
-      setState((s) => ({ ...s, watchlist: saved }));
+
+      // Carga de inmediato las revisiones reales de este repo (si ya tiene
+      // historial en el backend) en vez de esperar al próximo refresh
+      // completo; evita el "aparece en 0 y luego se llena" al agregar uno.
+      let newRuns: ReviewRun[] = [];
+      const newFindingsByRun: Record<string, Finding[]> = {};
+      if (state.apiRepos.includes(name)) {
+        try {
+          const reviews = await fetchReviews(name);
+          for (const { findings, ...run } of reviews) {
+            newRuns.push(run);
+            newFindingsByRun[run.pipeline_run_id] = findings;
+          }
+        } catch {
+          // Si falla la carga puntual, el próximo refresh la reintentará;
+          // no bloquea que el repo quede agregado a la selección.
+          newRuns = [];
+        }
+      }
+
+      setState((s) => ({
+        ...s,
+        watchlist: saved,
+        runs: [...s.runs, ...newRuns].sort((a, b) => a.created_at.localeCompare(b.created_at)),
+        findingsByRun: { ...s.findingsByRun, ...newFindingsByRun },
+      }));
       return { ok: true };
     },
-    [state.watchlist],
+    [state.watchlist, state.apiRepos],
   );
 
   const removeRepo = useCallback(
