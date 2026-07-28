@@ -59,6 +59,8 @@ export interface AuthMe {
 export interface MyRepo {
   full_name: string;
   private: boolean;
+  /** true si la GitHub App de Arcus ya está instalada en este repo. */
+  app_installed: boolean;
 }
 
 /** URL que inicia el flujo real de GitHub OAuth (redirige el navegador entero). */

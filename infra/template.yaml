@@ -701,6 +701,8 @@ Resources:
           OAUTH_REDIRECT_URI: !Ref OAuthRedirectUri
           SECRET_CACHE_TTL_SECONDS: !Ref SecretCacheTtlSeconds
           SESSION_TTL_SECONDS: !Ref SessionTtlSeconds
+          GITHUB_APP_ID: !Ref GitHubAppId
+          GITHUB_APP_PRIVATE_KEY_SECRET_ARN: !Ref GitHubAppPrivateKeySecret
       Policies:
         - Version: "2012-10-17"
           Statement:
@@ -710,6 +712,10 @@ Resources:
               Resource:
                 - !Ref GitHubOAuthClientSecret
                 - !Ref SessionSecret
+            - Sid: ReadGitHubAppPrivateKey
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref GitHubAppPrivateKeySecret
             - Sid: ReadWriteUserState
               Effect: Allow
               Action:

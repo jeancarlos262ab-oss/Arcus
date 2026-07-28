@@ -38,7 +38,8 @@ from arcus.auth import (
     SessionSigner,
     build_authorize_url,
 )
-from arcus.errors import PermanentError
+from arcus.errors import PermanentError, TransientError
+from arcus.github.app_auth import GitHubAppAuthenticator
 from arcus.secrets import CachedSecretProvider, SecretsManagerClient
 from arcus.storage.users import UserProfile, UserStore
 
@@ -58,6 +59,8 @@ class AuthApiSettings:
     session_secret_arn: str
     dashboard_base_url: str
     redirect_uri: str
+    github_app_id: int
+    github_app_private_key_secret_arn: str
     secret_cache_ttl_seconds: int = 300
     session_ttl_seconds: int = 12 * 60 * 60
 
@@ -82,6 +85,10 @@ class AuthApiSettings:
             session_secret_arn=_required_environment("SESSION_SECRET_ARN"),
             dashboard_base_url=_required_environment("DASHBOARD_BASE_URL").rstrip("/"),
             redirect_uri=_required_environment("OAUTH_REDIRECT_URI"),
+            github_app_id=int(_required_environment("GITHUB_APP_ID")),
+            github_app_private_key_secret_arn=_required_environment(
+                "GITHUB_APP_PRIVATE_KEY_SECRET_ARN"
+            ),
             secret_cache_ttl_seconds=_positive_int_environment(
                 "SECRET_CACHE_TTL_SECONDS", 300
             ),
@@ -101,6 +108,7 @@ class AuthApiHandler:
         oauth_client: GitHubOAuthClient,
         session_signer: SessionSigner,
         user_store: UserStore,
+        app_authenticator: GitHubAppAuthenticator,
         clock: Any = time,
         state_factory: Any = lambda: secrets.token_urlsafe(24),
     ) -> None:
@@ -110,6 +118,7 @@ class AuthApiHandler:
         self._oauth = oauth_client
         self._sessions = session_signer
         self._users = user_store
+        self._app_auth = app_authenticator
         self._clock = clock
         self._state_factory = state_factory
 
@@ -226,7 +235,7 @@ class AuthApiHandler:
         )
 
     def _my_repos(self, event: Mapping[str, object]) -> dict[str, object]:
-        """Return the repositories the logged-in user can see on GitHub."""
+        """Return the user's GitHub repos, each flagged with the App's install status."""
 
         session = self._require_session(event)
         profile = self._users.get_profile(session.github_user_id)
@@ -237,11 +246,31 @@ class AuthApiHandler:
             200,
             {
                 "repos": [
-                    {"full_name": repo.full_name, "private": repo.private}
+                    {
+                        "full_name": repo.full_name,
+                        "private": repo.private,
+                        "app_installed": self._is_app_installed(repo.full_name),
+                    }
                     for repo in repositories
                 ]
             },
         )
+
+    def _is_app_installed(self, repo_full_name: str) -> bool:
+        """Check the App's install status, degrading to 'unknown as installed'.
+
+        A transient GitHub failure here must never block the repo list from
+        rendering; it only means the "Install on GitHub" prompt might show up
+        for a repo that already has the App, which the user can dismiss.
+        """
+
+        try:
+            return self._app_auth.is_installed_on_repository(repo_full_name)
+        except TransientError:
+            logger.warning(
+                "app_installation_check_failed", extra={"repo": repo_full_name}
+            )
+            return True
 
     def _get_watchlist(self, event: Mapping[str, object]) -> dict[str, object]:
         """Return the repositories the logged-in user chose to watch."""
@@ -439,6 +468,11 @@ def _get_handler() -> AuthApiHandler:
         ttl_seconds=settings.secret_cache_ttl_seconds,
         field_names=("session_secret", "secret"),
     )
+    app_private_key_provider = CachedSecretProvider(
+        secrets_client,
+        settings.github_app_private_key_secret_arn,
+        ttl_seconds=settings.secret_cache_ttl_seconds,
+    )
     return AuthApiHandler(
         settings=settings,
         oauth_client=GitHubOAuthClient(
@@ -448,4 +482,7 @@ def _get_handler() -> AuthApiHandler:
             session_secret_provider.get(), ttl_seconds=settings.session_ttl_seconds
         ),
         user_store=UserStore(settings.review_table_name, client=dynamodb_client),
+        app_authenticator=GitHubAppAuthenticator(
+            settings.github_app_id, app_private_key_provider
+        ),
     )

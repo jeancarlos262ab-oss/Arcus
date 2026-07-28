@@ -225,6 +225,46 @@ class GitHubAppAuthenticator:
         self._cached_tokens[installation_id] = (token, now + 50 * 60)
         return token
 
+    def is_installed_on_repository(self, repo_full_name: str) -> bool:
+        """Check whether this GitHub App is installed on one repository.
+
+        Used only to guide the dashboard's "install on GitHub" prompt; never
+        used by the review pipeline itself, which always receives the
+        installation ID directly from the webhook payload.
+        """
+
+        if repo_full_name.count("/") != 1:
+            raise ValueError("repo_full_name must be owner/repo")
+
+        now = self._clock()
+        app_jwt = jwt.encode(
+            {
+                "iat": int(now) - 60,
+                "exp": int(now) + 540,
+                "iss": str(self._app_id),
+            },
+            self._private_key_provider.get(),
+            algorithm="RS256",
+        )
+        try:
+            self._transport.request(
+                "GET",
+                f"{self._api_base_url}/repos/{repo_full_name}/installation",
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": f"Bearer {app_jwt}",
+                    "User-Agent": "arcus-pr-reviewer",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            return True
+        except PermanentError as error:
+            if error.code == "github_request_rejected" and error.message.endswith(
+                "status 404"
+            ):
+                return False
+            raise
+
 
 def _json_object(body: bytes) -> Mapping[str, object]:
     """Parse one untrusted GitHub JSON object."""
