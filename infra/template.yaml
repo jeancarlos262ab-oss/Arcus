@@ -131,6 +131,25 @@ Parameters:
   AlarmNotificationEmail:
     Type: String
     Default: ""
+  GitHubOAuthClientId:
+    Type: String
+    Default: replace-with-real-oauth-client-id
+    MinLength: 1
+    Description: Public client ID of the GitHub OAuth App used for dashboard login.
+  DashboardBaseUrl:
+    Type: String
+    Default: https://replace-with-deployed-dashboard-origin.example
+    MinLength: 1
+    Description: Deployed dashboard origin, used as the post-login redirect and the allowed CORS origin for cookie-based routes.
+  OAuthRedirectUri:
+    Type: String
+    Default: https://replace-with-api-id.execute-api.us-east-1.amazonaws.com/auth/callback
+    MinLength: 1
+    Description: Must exactly match a callback URL registered on the GitHub OAuth App.
+  SessionTtlSeconds:
+    Type: Number
+    Default: 43200
+    MinValue: 1
 
 Conditions:
   HasAlarmNotificationEmail: !Not [!Equals [!Ref AlarmNotificationEmail, ""]]
@@ -294,6 +313,27 @@ Resources:
         GenerateStringKey: api_key
         ExcludePunctuation: true
         PasswordLength: 40
+
+  GitHubOAuthClientSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub arcus-${Environment}-github-oauth-client-secret
+      Description: Populate the GitHub OAuth App client secret outside CloudFormation.
+
+  SessionSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub arcus-${Environment}-session-secret
+      Description: HMAC secret signing dashboard login sessions; rotating it logs out every user.
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: session_secret
+        ExcludePunctuation: true
+        PasswordLength: 64
 
   CostAlarmTopic:
     Type: AWS::SNS::Topic
@@ -570,13 +610,16 @@ Resources:
   DashboardHttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
-      Description: Public read-only API for the Arcus dashboard SPA, protected by an API key.
+      Description: Read-only dashboard data plus GitHub OAuth login for the Arcus dashboard SPA.
       StageName: "$default"
       FailOnWarnings: true
       CorsConfiguration:
-        AllowOrigins: ["*"]
-        AllowMethods: [GET]
+        # Cookie-based login routes require one explicit origin and
+        # AllowCredentials; browsers reject "*" with credentialed requests.
+        AllowOrigins: [!Ref DashboardBaseUrl]
+        AllowMethods: [GET, PUT, POST, OPTIONS]
         AllowHeaders: [x-api-key, content-type]
+        AllowCredentials: true
       DefaultRouteSettings:
         ThrottlingBurstLimit: 10
         ThrottlingRateLimit: 5
@@ -638,6 +681,84 @@ Resources:
             ApiId: !Ref DashboardHttpApi
             Path: /graph
             Method: GET
+
+  AuthApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: python-uv
+    Properties:
+      FunctionName: !Sub arcus-${Environment}-auth-api
+      Description: GitHub OAuth login and per-user dashboard watchlist state.
+      CodeUri: ../
+      Handler: arcus.entrypoints.auth_api.lambda_handler
+      Timeout: 10
+      Environment:
+        Variables:
+          GITHUB_OAUTH_CLIENT_ID: !Ref GitHubOAuthClientId
+          GITHUB_OAUTH_CLIENT_SECRET_ARN: !Ref GitHubOAuthClientSecret
+          SESSION_SECRET_ARN: !Ref SessionSecret
+          DASHBOARD_BASE_URL: !Ref DashboardBaseUrl
+          OAUTH_REDIRECT_URI: !Ref OAuthRedirectUri
+          SECRET_CACHE_TTL_SECONDS: !Ref SecretCacheTtlSeconds
+          SESSION_TTL_SECONDS: !Ref SessionTtlSeconds
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Sid: ReadOAuthSecrets
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                - !Ref GitHubOAuthClientSecret
+                - !Ref SessionSecret
+            - Sid: ReadWriteUserState
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt ReviewHistoryTable.Arn
+      Events:
+        Login:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /auth/login
+            Method: GET
+        Callback:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /auth/callback
+            Method: GET
+        Logout:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /auth/logout
+            Method: POST
+        Me:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /me
+            Method: GET
+        MyRepos:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /me/repos
+            Method: GET
+        GetWatchlist:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /me/watchlist
+            Method: GET
+        PutWatchlist:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref DashboardHttpApi
+            Path: /me/watchlist
+            Method: PUT
 
   WebhookFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -709,6 +830,14 @@ Resources:
     UpdateReplacePolicy: Delete
     Properties:
       LogGroupName: !Sub /aws/lambda/${DashboardApiFunction}
+      RetentionInDays: 14
+
+  AuthApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AuthApiFunction}
       RetentionInDays: 14
 
   PipelineLogGroup:
@@ -942,3 +1071,11 @@ Outputs:
     Value: !Ref DashboardApiKeySecret
   DashboardApiFunctionArn:
     Value: !GetAtt DashboardApiFunction.Arn
+  AuthApiFunctionArn:
+    Value: !GetAtt AuthApiFunction.Arn
+  GitHubOAuthClientSecretArn:
+    Value: !Ref GitHubOAuthClientSecret
+  SessionSecretArn:
+    Value: !Ref SessionSecret
+  OAuthLoginUrl:
+    Value: !Sub https://${DashboardHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/auth/login

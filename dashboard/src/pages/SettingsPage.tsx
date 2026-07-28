@@ -74,8 +74,8 @@ export function SettingsPage() {
           </div>
         </Panel>
 
-        {/* Repositorios: elegidos explícitamente por quien usa este navegador */}
-        <Panel title="Repositorios" subtitle="Tu lista personal, solo en este navegador">
+        {/* Repositorios: elegidos explícitamente por el usuario logueado */}
+        <Panel title="Repositorios" subtitle="Tu selección, guardada en tu cuenta">
           <button onClick={() => setConnectOpen(true)} className="btn-primary mb-3 w-full justify-center">
             <Plug size={14} />
             Conectar un repositorio
@@ -92,7 +92,7 @@ export function SettingsPage() {
                 >
                   <span className="font-mono text-sm text-ink">{repo}</span>
                   <button
-                    onClick={() => removeRepo(repo)}
+                    onClick={() => void removeRepo(repo)}
                     className="focus-ring grid h-6 w-6 place-items-center rounded-md text-faint hover:bg-surface-2 hover:text-ink"
                     aria-label={`Quitar ${repo} de tu lista`}
                     title="Quitar de tu lista"
@@ -106,7 +106,7 @@ export function SettingsPage() {
 
           {repos.length > 0 && (
             <button
-              onClick={disconnectAll}
+              onClick={() => void disconnectAll()}
               className="btn-ghost mt-3 w-full justify-center text-red-500"
             >
               <Trash2 size={14} />
@@ -114,9 +114,10 @@ export function SettingsPage() {
             </button>
           )}
           <p className="mt-3 text-[0.72rem] text-faint">
-            Esta lista es personal: solo se guarda en este navegador y nunca se comparte con
-            otras personas que abran el dashboard. Cada repositorio necesita la GitHub App
-            instalada y al menos un Pull Request procesado para mostrar datos.
+            Esta lista es personal: se guarda en tu cuenta de GitHub, no en este navegador, y
+            nunca se comparte con otras personas que usen el dashboard. Cada repositorio
+            necesita la GitHub App instalada y al menos un Pull Request procesado para
+            mostrar datos.
           </p>
         </Panel>
 

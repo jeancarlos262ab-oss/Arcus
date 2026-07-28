@@ -51,6 +51,8 @@ ignore = ["E501"]
 "src/arcus/storage/admission.py" = ["N803"]
 "src/arcus/storage/artifacts.py" = ["N803"]
 "src/arcus/storage/history.py" = ["N803"]
+"src/arcus/storage/users.py" = ["N803"]
+"tests/unit/auth/test_oauth.py" = ["N803"]
 
 [tool.mypy]
 python_version = "3.12"

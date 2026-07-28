@@ -1,7 +1,17 @@
 import { useMemo } from "react";
-import { Activity, FolderGit2, LayoutDashboard, Settings, ShieldCheck, Workflow, X } from "lucide-react";
+import {
+  Activity,
+  FolderGit2,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+  ShieldCheck,
+  Workflow,
+  X,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useStore } from "@/state/StoreProvider";
+import { useAuth } from "@/state/AuthProvider";
 import { repoHealthSummaries } from "@/lib/selectors";
 import { RepoPreviewCard } from "@/components/ui/RepoPreview";
 
@@ -52,6 +62,7 @@ export function Sidebar({
   };
 
   const { runs } = useStore();
+  const { user, logout } = useAuth();
   const summaries = useMemo(() => repoHealthSummaries(runs, repos), [runs, repos]);
   const summaryByRepo = useMemo(() => new Map(summaries.map((s) => [s.repo, s])), [summaries]);
 
@@ -134,6 +145,20 @@ export function Sidebar({
             })}
           </div>
         </div>
+
+        {user && (
+          <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-3">
+            <span className="min-w-0 truncate text-xs font-medium text-ink">{user.login}</span>
+            <button
+              onClick={() => void logout()}
+              className="focus-ring grid h-7 w-7 shrink-0 place-items-center rounded-md text-faint hover:bg-surface-2 hover:text-ink"
+              aria-label="Cerrar sesión"
+              title="Cerrar sesión"
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        )}
 
         <div className="px-5 py-4 text-[0.68rem] text-faint">
           Arcus · Multiagente PR Review

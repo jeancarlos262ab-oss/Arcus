@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ExternalLink, Plus, X } from "lucide-react";
 
 import { Modal } from "@/components/Modal";
 import { useStore } from "@/state/StoreProvider";
+import { fetchMyRepos } from "@/lib/authApi";
 import { RUNTIME_CONFIG } from "@/lib/runtimeConfig";
 
 interface ConnectRepoModalProps {
@@ -13,17 +14,33 @@ interface ConnectRepoModalProps {
 /**
  * Ventana emergente para conectar un repositorio: enlaza a la instalación
  * real de la GitHub App (consentimiento del dueño en GitHub) y, por separado,
- * permite agregar un nombre a la watchlist local para tenerlo listo en el
- * selector antes de su primera revisión real.
+ * permite elegir cuáles de tus propios repos de GitHub ver en el dashboard.
+ * La selección se guarda en tu cuenta, no en este navegador.
  */
 export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
   const { addRepo, watchedRepos, removeRepo, disconnectAll, availableRepos } = useStore();
   const [newRepo, setNewRepo] = useState("");
   const [repoError, setRepoError] = useState<string | null>(null);
+  const [myRepos, setMyRepos] = useState<string[]>([]);
 
-  const handleAddRepo = (e: FormEvent) => {
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetchMyRepos()
+      .then((repos) => {
+        if (!cancelled) setMyRepos(repos.map((r) => r.full_name));
+      })
+      .catch(() => {
+        // Silencioso: la lista de sugerencias es una comodidad, no algo crítico.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const handleAddRepo = async (e: FormEvent) => {
     e.preventDefault();
-    const result = addRepo(newRepo);
+    const result = await addRepo(newRepo);
     if (result.ok) {
       setNewRepo("");
       setRepoError(null);
@@ -32,7 +49,9 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
     }
   };
 
-  const suggestions = availableRepos.filter((repo) => !watchedRepos.includes(repo));
+  const suggestions = [...new Set([...myRepos, ...availableRepos])].filter(
+    (repo) => !watchedRepos.includes(repo),
+  );
 
   const handleInstallOnGitHub = () => {
     if (!RUNTIME_CONFIG.githubAppInstallUrl) return;
@@ -82,8 +101,8 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
 
       <div className="my-4 h-px bg-border" />
 
-      <p className="mb-2 text-xs font-semibold text-muted">Ver un repositorio en este navegador</p>
-      <form onSubmit={handleAddRepo} className="mb-2 flex gap-2">
+      <p className="mb-2 text-xs font-semibold text-muted">Elegir un repositorio para tu cuenta</p>
+      <form onSubmit={(e) => void handleAddRepo(e)} className="mb-2 flex gap-2">
         <input
           className="input flex-1"
           placeholder="owner/repo"
@@ -102,14 +121,12 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
 
       {suggestions.length > 0 && (
         <div className="mb-3">
-          <p className="mb-1.5 text-[0.72rem] text-faint">
-            Repositorios con revisiones que puedes agregar:
-          </p>
+          <p className="mb-1.5 text-[0.72rem] text-faint">Tus repositorios de GitHub:</p>
           <div className="flex flex-wrap gap-1.5">
             {suggestions.map((repo) => (
               <button
                 key={repo}
-                onClick={() => addRepo(repo)}
+                onClick={() => void addRepo(repo)}
                 className="focus-ring rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-muted hover:border-accent hover:text-ink"
               >
                 {repo}
@@ -129,7 +146,7 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
             >
               <span className="font-mono text-sm text-ink">{repo}</span>
               <button
-                onClick={() => removeRepo(repo)}
+                onClick={() => void removeRepo(repo)}
                 className="focus-ring grid h-6 w-6 place-items-center rounded-md text-faint hover:bg-surface-2 hover:text-ink"
                 aria-label={`Quitar ${repo} de tu lista`}
                 title="Quitar de tu lista"
@@ -139,7 +156,7 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
             </div>
           ))}
           <button
-            onClick={disconnectAll}
+            onClick={() => void disconnectAll()}
             className="mt-1 text-[0.72rem] text-faint underline-offset-2 hover:text-ink hover:underline"
           >
             Quitar todos
@@ -148,9 +165,9 @@ export function ConnectRepoModal({ open, onClose }: ConnectRepoModalProps) {
       )}
 
       <p className="mt-3 text-[0.72rem] text-faint">
-        Esta lista es solo tuya, guardada en este navegador; no afecta lo que ven otras
-        personas ni instala nada en GitHub. El repositorio debe tener la GitHub App instalada
-        y al menos un Pull Request procesado para mostrar datos.
+        Esta lista es solo tuya, guardada en tu cuenta; no afecta lo que ven otras personas ni
+        instala nada en GitHub. El repositorio debe tener la GitHub App instalada y al menos
+        un Pull Request procesado para mostrar datos.
       </p>
     </Modal>
   );

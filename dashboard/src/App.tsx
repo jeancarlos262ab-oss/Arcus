@@ -1,11 +1,12 @@
-import { lazy, Suspense, useState } from "react";
-import { Menu, Plug, RefreshCw, TriangleAlert } from "lucide-react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
+import { Github, Menu, Plug, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { Sidebar, type PageKey } from "@/components/Sidebar";
 import { PageSkeleton } from "@/components/PageSkeleton";
 import { ConnectRepoModal } from "@/components/ConnectRepoModal";
 
 import { ThemeProvider } from "@/state/ThemeProvider";
+import { AuthProvider, useAuth } from "@/state/AuthProvider";
 import { StoreProvider, useStore } from "@/state/StoreProvider";
 
 // Carga diferida por página: cada pantalla (y sus dependencias pesadas, como
@@ -129,12 +130,69 @@ function Shell() {
   );
 }
 
+/**
+ * Exige un login real de GitHub antes de mostrar cualquier dato. Cada
+ * persona ve únicamente su propia sesión y su propia selección de repos;
+ * nunca hay un usuario ni una lista compartida por defecto.
+ */
+function AuthGate({ children }: { children: ReactNode }) {
+  const { loading, user, configError, login } = useAuth();
+
+  if (configError) {
+    return (
+      <div className="grid min-h-screen place-items-center p-6">
+        <div className="panel flex max-w-md flex-col items-start gap-3 p-6">
+          <div className="flex items-center gap-2 text-high">
+            <TriangleAlert size={18} />
+            <span className="font-semibold">Dashboard no configurado</span>
+          </div>
+          <p className="text-sm text-muted">{configError}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="grid min-h-screen place-items-center">
+        <PageSkeleton />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="grid min-h-screen place-items-center p-6">
+        <div className="panel flex max-w-sm flex-col items-center gap-4 p-8 text-center">
+          <img src="/logo.png" alt="Arcus" className="h-12 w-12 dark:brightness-0 dark:invert" />
+          <div>
+            <h1 className="text-lg font-extrabold text-ink">Arcus Repo Health</h1>
+            <p className="mt-1 text-sm text-muted">
+              Inicia sesión con GitHub para ver tus propios repositorios y sus revisiones.
+            </p>
+          </div>
+          <button onClick={login} className="btn-primary w-full justify-center">
+            <Github size={16} />
+            Iniciar sesión con GitHub
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
-      <StoreProvider>
-        <Shell />
-      </StoreProvider>
+      <AuthProvider>
+        <AuthGate>
+          <StoreProvider>
+            <Shell />
+          </StoreProvider>
+        </AuthGate>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

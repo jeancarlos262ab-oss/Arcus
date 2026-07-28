@@ -9,7 +9,9 @@ import {
 } from "react";
 
 import { ApiConfigError, ApiRequestError, fetchRepos, fetchReviews } from "@/lib/api";
+import { fetchMyWatchlist, saveMyWatchlist } from "@/lib/authApi";
 import { RUNTIME_CONFIG } from "@/lib/runtimeConfig";
+import { useAuth } from "@/state/AuthProvider";
 import type { Finding, ReviewRun } from "@/lib/types";
 
 export type RangeKey = "30d" | "60d" | "90d";
@@ -22,7 +24,9 @@ interface DisplaySettings {
 interface StoreState {
   loading: boolean;
   error: string | null;
-  /** Repos con al menos una revisión real en DynamoDB. */
+  /** La selección del usuario logueado, leída de su cuenta (no del navegador). */
+  watchlist: string[];
+  /** Repos con al menos una revisión real en DynamoDB, entre todos los usuarios. */
   apiRepos: string[];
   runs: ReviewRun[];
   findingsByRun: Record<string, Finding[]>;
@@ -31,43 +35,13 @@ interface StoreState {
 const INITIAL_STATE: StoreState = {
   loading: true,
   error: null,
+  watchlist: [],
   apiRepos: [],
   runs: [],
   findingsByRun: {},
 };
 
-const WATCHLIST_KEY = "arcus.watchedRepos.v1";
 const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
-
-function loadStringList(key: string): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((r): r is string => typeof r === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveStringList(key: string, values: string[]): void {
-  localStorage.setItem(key, JSON.stringify(values));
-}
-
-/**
- * Repos elegidos explícitamente por quien usa este navegador, guardados
- * localmente. El backend puede tener historial de muchos repos compartidos
- * entre todo el equipo; el dashboard nunca los muestra automáticamente,
- * cada persona elige los suyos aquí. Vacío por defecto: nada aparece hasta
- * que el usuario agrega un repo.
- */
-function loadWatchlist(): string[] {
-  return loadStringList(WATCHLIST_KEY);
-}
-
-function saveWatchlist(repos: string[]): void {
-  saveStringList(WATCHLIST_KEY, repos);
-}
 
 interface StoreContextValue {
   loading: boolean;
@@ -80,19 +54,19 @@ interface StoreContextValue {
   setSelectedRepo: (repo: string) => void;
   setRangeKey: (key: RangeKey) => void;
   getFindings: (runId: string) => Finding[];
-  /** Vuelve a cargar repos y revisiones desde la API real. */
+  /** Vuelve a cargar la selección y las revisiones desde la cuenta del usuario. */
   refresh: () => void;
   /**
-   * Elige un repo para verlo en este navegador (owner/repo). No crea datos
-   * falsos: solo agrega el nombre a tu lista local, con o sin historial real
-   * todavía.
+   * Elige un repo para verlo (owner/repo), guardado en la cuenta de GitHub del
+   * usuario logueado. No crea datos falsos: solo agrega el nombre a su
+   * selección, con o sin historial real todavía.
    */
-  addRepo: (fullName: string) => { ok: boolean; error?: string };
-  /** Quita un repo de tu lista local. No borra nada en DynamoDB/S3. */
-  removeRepo: (fullName: string) => void;
-  /** Vacía tu lista local por completo: el dashboard queda como recién instalado. */
-  disconnectAll: () => void;
-  /** Repos que tu lista local incluye. Puede tener 0, 1 o más elementos. */
+  addRepo: (fullName: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Quita un repo de la selección del usuario. No borra nada en DynamoDB/S3. */
+  removeRepo: (fullName: string) => Promise<void>;
+  /** Vacía la selección del usuario por completo. */
+  disconnectAll: () => Promise<void>;
+  /** Repos que la selección del usuario incluye. Puede tener 0, 1 o más elementos. */
   watchedRepos: string[];
   /**
    * Todo repo con al menos una revisión real en el backend compartido,
@@ -106,30 +80,45 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 
 /**
  * Carga y expone datos reales del backend de Arcus (DynamoDB vía la API de
- * solo lectura). No hay generación local ni simulación: si la API falla, el
- * estado queda en `error` y la UI lo muestra explícitamente.
+ * solo lectura) para el usuario logueado. La selección de repos vive en la
+ * cuenta de GitHub del usuario (vía `auth_api`), no en `localStorage`: cambia
+ * de navegador o de dispositivo y sigue siendo la misma. No hay generación
+ * local ni simulación: si la API falla, el estado queda en `error`.
  */
 export function StoreProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [state, setState] = useState<StoreState>(INITIAL_STATE);
-  const [watchlist, setWatchlist] = useState<string[]>(loadWatchlist);
   const [selectedRepo, setSelectedRepo] = useState<string>("");
   const [rangeKey, setRangeKey] = useState<RangeKey>("90d");
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
+    if (!user) {
+      setState(INITIAL_STATE);
+      return;
+    }
+
     let cancelled = false;
 
     async function load() {
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
-        // El catálogo completo (qué repos tienen historial en el backend
-        // compartido) solo sirve para elegir; nunca se muestra directamente.
-        const apiRepos = await fetchRepos();
+        const [apiRepos, watchlist] = await Promise.all([
+          fetchRepos(),
+          fetchMyWatchlist(),
+        ]);
         const reposToLoad = watchlist.filter((repo) => apiRepos.includes(repo));
 
         if (reposToLoad.length === 0) {
           if (!cancelled) {
-            setState({ loading: false, error: null, apiRepos, runs: [], findingsByRun: {} });
+            setState({
+              loading: false,
+              error: null,
+              watchlist,
+              apiRepos,
+              runs: [],
+              findingsByRun: {},
+            });
           }
           return;
         }
@@ -146,7 +135,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         runs.sort((a, b) => a.created_at.localeCompare(b.created_at));
 
         if (!cancelled) {
-          setState({ loading: false, error: null, apiRepos, runs, findingsByRun });
+          setState({ loading: false, error: null, watchlist, apiRepos, runs, findingsByRun });
         }
       } catch (err) {
         if (cancelled) return;
@@ -164,11 +153,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [reloadToken, watchlist]);
+  }, [reloadToken, user]);
 
-  // Repos visibles = únicamente los que el usuario eligió en este navegador.
-  // Nunca se muestra automáticamente el catálogo completo del backend.
-  const repos = useMemo(() => [...watchlist].sort(), [watchlist]);
+  // Repos visibles = únicamente los que el usuario eligió en su cuenta.
+  const repos = useMemo(() => [...state.watchlist].sort(), [state.watchlist]);
 
   // Mantén un repo válido seleccionado en cuanto la lista combinada esté lista.
   useEffect(() => {
@@ -187,37 +175,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(() => setReloadToken((t) => t + 1), []);
 
   const addRepo = useCallback(
-    (fullName: string) => {
+    async (fullName: string) => {
       const name = fullName.trim();
       if (!REPO_PATTERN.test(name)) {
         return { ok: false, error: "Formato inválido. Usa owner/repo." };
       }
-      if (watchlist.includes(name)) {
+      if (state.watchlist.includes(name)) {
         return { ok: false, error: "El repositorio ya está en tu lista." };
       }
-      setWatchlist((current) => {
-        const next = [...current, name];
-        saveWatchlist(next);
-        return next;
-      });
+      const saved = await saveMyWatchlist([...state.watchlist, name]);
+      setState((s) => ({ ...s, watchlist: saved }));
       return { ok: true };
     },
-    [watchlist],
+    [state.watchlist],
   );
 
-  const removeRepo = useCallback((fullName: string) => {
-    setWatchlist((current) => {
-      if (!current.includes(fullName)) return current;
-      const next = current.filter((r) => r !== fullName);
-      saveWatchlist(next);
-      return next;
-    });
-  }, []);
+  const removeRepo = useCallback(
+    async (fullName: string) => {
+      if (!state.watchlist.includes(fullName)) return;
+      const saved = await saveMyWatchlist(state.watchlist.filter((r) => r !== fullName));
+      setState((s) => ({ ...s, watchlist: saved }));
+    },
+    [state.watchlist],
+  );
 
-  /** Vacía la lista local por completo: el dashboard queda como recién instalado. */
-  const disconnectAll = useCallback(() => {
-    setWatchlist([]);
-    saveWatchlist([]);
+  /** Vacía la selección del usuario por completo. */
+  const disconnectAll = useCallback(async () => {
+    await saveMyWatchlist([]);
+    setState((s) => ({ ...s, watchlist: [] }));
     setSelectedRepo("");
   }, []);
 
@@ -242,7 +227,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addRepo,
       removeRepo,
       disconnectAll,
-      watchedRepos: watchlist,
+      watchedRepos: state.watchlist,
       availableRepos: state.apiRepos,
     }),
     [
@@ -258,7 +243,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addRepo,
       removeRepo,
       disconnectAll,
-      watchlist,
+      state.watchlist,
       state.apiRepos,
     ],
   );
